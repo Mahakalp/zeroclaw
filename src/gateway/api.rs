@@ -320,8 +320,17 @@ pub async fn handle_api_config_put(
         }
     };
 
-    // Save to disk
-    if let Err(e) = new_config.save().await {
+    // Preserve the config_path from the current in-memory config
+    let config_path = {
+        let current_config = state.config.lock();
+        current_config.config_path.clone()
+    };
+
+    // Save to disk (config_path is already set if we cloned it first)
+    let mut config_to_save = new_config;
+    config_to_save.config_path = config_path;
+
+    if let Err(e) = config_to_save.save().await {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": format!("Failed to save config: {e}")})),
@@ -330,7 +339,7 @@ pub async fn handle_api_config_put(
     }
 
     // Update in-memory config
-    *state.config.lock() = new_config;
+    *state.config.lock() = config_to_save;
 
     Json(serde_json::json!({"status": "ok"})).into_response()
 }
