@@ -1,7 +1,6 @@
 name: Deploy to VPS
 
 on:
-  # Manual deployment only - you control when to deploy
   workflow_dispatch:
     inputs:
       environment:
@@ -20,8 +19,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  # Use a custom tag based on commit SHA to avoid conflicts
-  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
   build:
@@ -35,7 +32,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.branch || 'main' }}
+          ref: ${{ github.event.inputs.branch || 'vps-deploy' }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -75,26 +72,14 @@ jobs:
     
     steps:
       - name: Deploy to VPS
-        id: deploy
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
-          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-          DOCKER_IMAGE: ${{ needs.build.outputs.image }}
-        run: |
-          # Write SSH key to temp file
-          echo "$VPS_SSH_KEY" > /tmp/ssh_key
-          chmod 600 /tmp/ssh_key
-          
-          echo "Deploying to VPS..."
-          echo "Image: $DOCKER_IMAGE"
-          
-          # SSH and deploy
-          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key $VPS_USER@$VPS_HOST << 'EOF'
-            set -e
-            
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
             echo "=== Pulling custom image ==="
-            docker pull $DOCKER_IMAGE || exit 1
+            docker pull ${{ needs.build.outputs.image }} || exit 1
             
             echo "=== Stopping existing container ==="
             docker stop zeroclaw 2>/dev/null || true
@@ -108,10 +93,10 @@ jobs:
               -v ~/.zeroclaw:/zeroclaw-data/.zeroclaw \
               -v zeroclaw-data:/zeroclaw-data \
               -e API_KEY \
-              -e PROVIDER=minimax \
-              -e MODEL=MiniMax-M2.5 \
+              -e PROVIDER=gemini \
+              -e MODEL=gemini-2.0-flash \
               -e ZEROCLAW_ALLOW_PUBLIC_BIND=true \
-              $DOCKER_IMAGE
+              ${{ needs.build.outputs.image }}
             
             echo "=== Checking health ==="
             sleep 5
@@ -119,6 +104,5 @@ jobs:
             
             echo ""
             echo "=========================================="
-            echo "✅ Deployment complete!"
+            echo "Deployment complete!"
             echo "=========================================="
-          EOF
