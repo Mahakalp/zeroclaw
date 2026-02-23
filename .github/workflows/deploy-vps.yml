@@ -79,6 +79,9 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             IMAGE=${{ needs.build.outputs.image }}
+            echo "=== Creating network if needed ==="
+            docker network create zeroclaw-net 2>/dev/null || true
+            
             echo "=== Pulling custom image: $IMAGE ==="
             docker pull $IMAGE || exit 1
             
@@ -89,6 +92,7 @@ jobs:
             echo "=== Starting new container ==="
             docker run -d \
               --name zeroclaw \
+              --network zeroclaw-net \
               --restart unless-stopped \
               -p 42617:42617 \
               -v ~/.zeroclaw:/zeroclaw-data/.zeroclaw \
