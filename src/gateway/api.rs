@@ -170,6 +170,26 @@ pub async fn handle_api_config_put(
     Json(serde_json::json!({"status": "ok"})).into_response()
 }
 
+/// GET /api/config/schema — returns JSON Schema for config
+pub async fn handle_api_config_schema(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    let schema = schemars::schema_for!(crate::config::Config);
+    let schema_json = serde_json::to_value(&schema).expect("Config has valid JsonSchema");
+
+    Json(serde_json::json!({
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "ZeroClawConfig",
+        "config": schema_json,
+    }))
+    .into_response()
+}
+
 /// GET /api/tools — list registered tool specs
 pub async fn handle_api_tools(
     State(state): State<AppState>,
