@@ -32,6 +32,7 @@ Last refreshed: **February 18, 2026**.
 
 - [reference/README.md](reference/README.md)
 - [commands-reference.md](commands-reference.md)
+- [tools-reference.md](tools-reference.md)
 - [providers-reference.md](providers-reference.md)
 - [channels-reference.md](channels-reference.md)
 - [nextcloud-talk-setup.md](nextcloud-talk-setup.md)
