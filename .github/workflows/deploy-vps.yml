@@ -90,7 +90,7 @@ jobs:
             docker run -d \
               --name zeroclaw \
               --restart unless-stopped \
-              -p 127.0.0.1:42617:42617 \
+              -p 42617:42617 \
               -v ~/.zeroclaw:/zeroclaw-data/.zeroclaw \
               -v zeroclaw-data:/zeroclaw-data \
               -e ZEROCLAW_ALLOW_PUBLIC_BIND=true \
