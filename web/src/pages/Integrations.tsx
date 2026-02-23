@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Puzzle, Check, Zap, Clock } from 'lucide-react';
+import { Puzzle, Check, Zap, Clock, Settings } from 'lucide-react';
 import type { Integration } from '@/types/api';
 import { getIntegrations, toggleChannel } from '@/lib/api';
 import { FormToggle } from '@/components/ui/FormToggle';
+import { ChannelConfigModal } from '@/components/integrations/ChannelConfigModal';
 
 function statusBadge(status: Integration['status']) {
   switch (status) {
@@ -33,6 +34,7 @@ export default function Integrations() {
   const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [toggling, setToggling] = useState<string | null>(null);
+  const [configChannel, setConfigChannel] = useState<Integration | null>(null);
 
   const refreshIntegrations = () => {
     getIntegrations()
@@ -155,12 +157,23 @@ export default function Integrations() {
                             {integration.description}
                           </p>
                         </div>
-                        <span
-                          className={`flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${badge.classes}`}
-                        >
-                          <BadgeIcon className="h-3 w-3" />
-                          {badge.label}
-                        </span>
+                        <div className="flex flex-col items-end gap-2">
+                          <span
+                            className={`flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${badge.classes}`}
+                          >
+                            <BadgeIcon className="h-3 w-3" />
+                            {badge.label}
+                          </span>
+                          {integration.status !== 'ComingSoon' && (
+                            <button
+                              onClick={() => setConfigChannel(integration)}
+                              className="p-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+                              title="Configure"
+                            >
+                              <Settings className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       {hasToggle && integration.status !== 'ComingSoon' && (
                         <div className="mt-4 pt-3 border-t border-gray-800">
@@ -187,6 +200,14 @@ export default function Integrations() {
               </div>
             </div>
           ))
+      )}
+
+      {configChannel && (
+        <ChannelConfigModal
+          channel={configChannel}
+          onClose={() => setConfigChannel(null)}
+          onSaved={refreshIntegrations}
+        />
       )}
     </div>
   );
