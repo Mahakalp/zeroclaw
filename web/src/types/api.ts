@@ -11,6 +11,13 @@ export interface StatusResponse {
   health: HealthSnapshot;
 }
 
+export interface HealthResponse {
+  status: string;
+  paired: boolean;
+  require_pairing: boolean;
+  runtime: HealthSnapshot;
+}
+
 export interface HealthSnapshot {
   pid: number;
   updated_at: string;

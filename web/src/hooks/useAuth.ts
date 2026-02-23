@@ -9,11 +9,13 @@ import {
 import React from 'react';
 import {
   getToken as readToken,
+  getToken,
   setToken as writeToken,
   clearToken as removeToken,
   isAuthenticated as checkAuth,
 } from '../lib/auth';
 import { pair as apiPair } from '../lib/api';
+import type { HealthResponse } from '../types/api';
 
 // ---------------------------------------------------------------------------
 // Context shape
@@ -43,6 +45,27 @@ export interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [token, setTokenState] = useState<string | null>(readToken);
   const [authenticated, setAuthenticated] = useState<boolean>(checkAuth);
+
+  useEffect(() => {
+    async function checkPairingRequirement() {
+      try {
+        const response = await fetch('/health');
+        if (response.ok) {
+          const data = (await response.json()) as HealthResponse;
+          if (!data.require_pairing) {
+            setAuthenticated(true);
+          } else {
+            const existingToken = getToken();
+            setAuthenticated(existingToken !== null && existingToken.length > 0);
+          }
+        }
+      } catch {
+        const existingToken = getToken();
+        setAuthenticated(existingToken !== null && existingToken.length > 0);
+      }
+    }
+    checkPairingRequirement();
+  }, []);
 
   // Keep state in sync if localStorage is changed in another tab
   useEffect(() => {
