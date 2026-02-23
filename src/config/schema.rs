@@ -2009,6 +2009,11 @@ pub struct AutonomyConfig {
     /// model in tool specs.
     #[serde(default)]
     pub non_cli_excluded_tools: Vec<String>,
+
+    /// Tools that are disabled (not available to the agent).
+    /// When this list is empty, all registered tools are available.
+    #[serde(default)]
+    pub disabled_tools: Vec<String>,
 }
 
 fn default_auto_approve() -> Vec<String> {
@@ -2077,6 +2082,7 @@ impl Default for AutonomyConfig {
             always_ask: default_always_ask(),
             allowed_roots: Vec::new(),
             non_cli_excluded_tools: Vec::new(),
+            disabled_tools: Vec::new(),
         }
     }
 }
@@ -4883,6 +4889,7 @@ default_temperature = 0.7
                 always_ask: vec![],
                 allowed_roots: vec![],
                 non_cli_excluded_tools: vec![],
+                disabled_tools: vec![],
             },
             security: SecurityConfig::default(),
             runtime: RuntimeConfig {

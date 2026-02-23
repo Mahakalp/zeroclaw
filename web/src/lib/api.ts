@@ -134,6 +134,13 @@ export function getTools(): Promise<ToolSpec[]> {
   );
 }
 
+export function toggleTool(name: string, enabled: boolean): Promise<void> {
+  return apiFetch<{ status: string }>(`/api/tools/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ enabled }),
+  }).then(() => undefined);
+}
+
 // ---------------------------------------------------------------------------
 // Cron
 // ---------------------------------------------------------------------------
