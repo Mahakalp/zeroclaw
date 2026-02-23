@@ -320,15 +320,19 @@ pub async fn handle_api_config_put(
         }
     };
 
-    // Preserve the config_path from the current in-memory config
-    let config_path = {
+    // Preserve config_path and secrets from the current in-memory config
+    let (config_path, secrets) = {
         let current_config = state.config.lock();
-        current_config.config_path.clone()
+        (
+            current_config.config_path.clone(),
+            current_config.secrets.clone(),
+        )
     };
 
-    // Save to disk (config_path is already set if we cloned it first)
+    // Save to disk (config_path and secrets must be preserved)
     let mut config_to_save = new_config;
     config_to_save.config_path = config_path;
+    config_to_save.secrets = secrets;
 
     if let Err(e) = config_to_save.save().await {
         return (
