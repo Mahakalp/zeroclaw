@@ -35,14 +35,6 @@ const PROVIDERS = [
   { value: 'cloudflare', label: 'Cloudflare AI' },
 ];
 
-const KNOWN_MODELS: Record<string, string[]> = {
-  google: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-2.5-pro-preview', 'gemini-2.0-flash-lite'],
-  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1', 'o1-mini'],
-  anthropic: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229'],
-  minimax: ['MiniMax-M2.5'],
-  ollama: ['llama3', 'mistral', 'codellama', 'qwen2.5'],
-};
-
 interface ProviderSectionProps {
   config: string;
   onConfigChange: (newConfig: string) => void;
@@ -54,9 +46,6 @@ export function ProviderSection({ config, onConfigChange }: ProviderSectionProps
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [loading, setLoading] = useState(true);
-
-  const availableModels = provider ? KNOWN_MODELS[provider] || [] : [];
-  const hasKnownModels = availableModels.length > 0;
 
   useEffect(() => {
     parseConfig(config);
@@ -164,21 +153,12 @@ export function ProviderSection({ config, onConfigChange }: ProviderSectionProps
           />
         </FormField>
 
-        <FormField label="Model">
-          {hasKnownModels ? (
-            <FormSelect
-              value={model}
-              onChange={setModel}
-              options={availableModels.map(m => ({ value: m, label: m }))}
-              placeholder="Select a model"
-            />
-          ) : (
-            <FormInput
-              value={model}
-              onChange={setModel}
-              placeholder="e.g., gpt-4o, claude-sonnet-4.6"
-            />
-          )}
+        <FormField label="Model" hint="Enter model name (e.g., gpt-4o, claude-sonnet-4.6, MiniMax-M2.5)">
+          <FormInput
+            value={model}
+            onChange={setModel}
+            placeholder="e.g., gpt-4o, claude-sonnet-4.6, MiniMax-M2.5"
+          />
         </FormField>
 
         <FormField label="API Key" hint="Leave empty to use environment variable">
