@@ -53,7 +53,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
-            type=sha,prefix=
+            type=sha
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -80,15 +80,16 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            IMAGE="${{ needs.build.outputs.image }}"
             echo "=========================================="
             echo "Deploying from FORK (not upstream)"
             echo "=========================================="
-            echo "Image: ${{ needs.build.outputs.image }}"
+            echo "Image: $IMAGE"
             echo "VPS: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
             echo ""
             
             echo "=== Pulling custom image ==="
-            docker pull ${{ needs.build.outputs.image }} || exit 1
+            docker pull "$IMAGE" || exit 1
             
             echo "=== Stopping existing container ==="
             docker stop zeroclaw 2>/dev/null || true
@@ -105,7 +106,7 @@ jobs:
               -e PROVIDER=minimax \
               -e MODEL=MiniMax-M2.5 \
               -e ZEROCLAW_ALLOW_PUBLIC_BIND=true \
-              ${{ needs.build.outputs.image }}
+              "$IMAGE"
             
             echo "=== Checking health ==="
             sleep 5
