@@ -845,3 +845,448 @@ fn mask_sensitive_fields(toml_str: &str) -> String {
     }
     output
 }
+
+// ==================== Profiles API ====================
+
+#[derive(Deserialize)]
+pub struct ProfileCreate {
+    name: String,
+    description: Option<String>,
+}
+
+pub async fn handle_api_profiles_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    if let Some(db) = &state.config_db {
+        match db.get_profiles() {
+            Ok(profiles) => Json(profiles).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response(),
+        }
+    } else {
+        Json::<Vec<crate::config::db::Profile>>(vec![]).into_response()
+    }
+}
+
+pub async fn handle_api_profiles_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<ProfileCreate>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    if let Some(db) = &state.config_db {
+        let profile = crate::config::db::Profile {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: payload.name,
+            description: payload.description,
+            is_active: false,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        match db.create_profile(&profile) {
+            Ok(_) => Json(profile).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response(),
+        }
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "Database not available" })),
+        )
+            .into_response()
+    }
+}
+
+pub async fn handle_api_profiles_activate(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    if let Some(db) = &state.config_db {
+        match db.set_active_profile(&id) {
+            Ok(_) => Json(serde_json::json!({ "status": "ok" })).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response(),
+        }
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "Database not available" })),
+        )
+            .into_response()
+    }
+}
+
+pub async fn handle_api_profiles_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    if let Some(db) = &state.config_db {
+        match db.delete_profile(&id) {
+            Ok(_) => Json(serde_json::json!({ "status": "ok" })).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response(),
+        }
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "Database not available" })),
+        )
+            .into_response()
+    }
+}
+
+// ==================== Providers API ====================
+
+#[derive(Deserialize)]
+pub struct ProviderCreate {
+    profile_id: String,
+    name: String,
+    api_key: Option<String>,
+    api_url: Option<String>,
+    default_model: Option<String>,
+    is_enabled: Option<bool>,
+    is_default: Option<bool>,
+}
+
+pub async fn handle_api_providers_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(profile_id): Query<Option<String>>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    if let Some(db) = &state.config_db {
+        // Get active profile if no profile_id provided
+        let pid: Option<String> = if let Some(ref pid) = profile_id {
+            Some(pid.clone())
+        } else {
+            db.get_active_profile().ok().flatten().map(|p| p.id)
+        };
+
+        if let Some(profile_id) = pid {
+            match db.get_providers(&profile_id) {
+                Ok(providers) => Json(providers).into_response(),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": e.to_string() })),
+                )
+                    .into_response(),
+            }
+        } else {
+            Json::<Vec<crate::config::db::Provider>>(vec![]).into_response()
+        }
+    } else {
+        Json::<Vec<crate::config::db::Provider>>(vec![]).into_response()
+    }
+}
+
+pub async fn handle_api_providers_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<ProviderCreate>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    if let Some(db) = &state.config_db {
+        let provider = crate::config::db::Provider {
+            id: uuid::Uuid::new_v4().to_string(),
+            profile_id: payload.profile_id,
+            name: payload.name,
+            api_key: payload.api_key,
+            api_url: payload.api_url,
+            default_model: payload.default_model,
+            is_enabled: payload.is_enabled.unwrap_or(true),
+            is_default: payload.is_default.unwrap_or(false),
+            priority: 0,
+            metadata: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        match db.create_provider(&provider) {
+            Ok(_) => Json(provider).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response(),
+        }
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "Database not available" })),
+        )
+            .into_response()
+    }
+}
+
+pub async fn handle_api_providers_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(mut payload): Json<ProviderCreate>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    if let Some(db) = &state.config_db {
+        // Get existing provider to preserve fields
+        if let Ok(Some(existing)) = db.get_provider(&id) {
+            payload.profile_id = existing.profile_id;
+
+            let provider = crate::config::db::Provider {
+                id,
+                profile_id: payload.profile_id,
+                name: payload.name,
+                api_key: payload.api_key,
+                api_url: payload.api_url,
+                default_model: payload.default_model,
+                is_enabled: payload.is_enabled.unwrap_or(existing.is_enabled),
+                is_default: payload.is_default.unwrap_or(existing.is_default),
+                priority: existing.priority,
+                metadata: existing.metadata,
+                created_at: existing.created_at,
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            };
+
+            match db.update_provider(&provider) {
+                Ok(_) => Json(provider).into_response(),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": e.to_string() })),
+                )
+                    .into_response(),
+            }
+        } else {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "Provider not found" })),
+            )
+                .into_response()
+        }
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "Database not available" })),
+        )
+            .into_response()
+    }
+}
+
+pub async fn handle_api_providers_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    if let Some(db) = &state.config_db {
+        match db.delete_provider(&id) {
+            Ok(_) => Json(serde_json::json!({ "status": "ok" })).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response(),
+        }
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "Database not available" })),
+        )
+            .into_response()
+    }
+}
+
+// ==================== Channels API ====================
+
+#[derive(Deserialize)]
+pub struct ChannelCreate {
+    profile_id: String,
+    channel_type: String,
+    config: String,
+    is_enabled: Option<bool>,
+}
+
+pub async fn handle_api_channels_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(profile_id): Query<Option<String>>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    if let Some(db) = &state.config_db {
+        let pid: Option<String> = if let Some(ref pid) = profile_id {
+            Some(pid.clone())
+        } else {
+            db.get_active_profile().ok().flatten().map(|p| p.id)
+        };
+
+        if let Some(profile_id) = pid {
+            match db.get_channels(&profile_id) {
+                Ok(channels) => Json(channels).into_response(),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": e.to_string() })),
+                )
+                    .into_response(),
+            }
+        } else {
+            Json::<Vec<crate::config::db::Channel>>(vec![]).into_response()
+        }
+    } else {
+        Json::<Vec<crate::config::db::Channel>>(vec![]).into_response()
+    }
+}
+
+pub async fn handle_api_channels_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<ChannelCreate>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    if let Some(db) = &state.config_db {
+        let channel = crate::config::db::Channel {
+            id: uuid::Uuid::new_v4().to_string(),
+            profile_id: payload.profile_id,
+            channel_type: payload.channel_type,
+            config: payload.config,
+            is_enabled: payload.is_enabled.unwrap_or(true),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        match db.create_channel(&channel) {
+            Ok(_) => Json(channel).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response(),
+        }
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "Database not available" })),
+        )
+            .into_response()
+    }
+}
+
+pub async fn handle_api_channels_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(mut payload): Json<ChannelCreate>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    if let Some(db) = &state.config_db {
+        if let Ok(Some(existing)) = db.get_channel(&id) {
+            payload.profile_id = existing.profile_id;
+
+            let channel = crate::config::db::Channel {
+                id,
+                profile_id: payload.profile_id,
+                channel_type: payload.channel_type,
+                config: payload.config,
+                is_enabled: payload.is_enabled.unwrap_or(existing.is_enabled),
+                created_at: existing.created_at,
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            };
+
+            match db.update_channel(&channel) {
+                Ok(_) => Json(channel).into_response(),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": e.to_string() })),
+                )
+                    .into_response(),
+            }
+        } else {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "Channel not found" })),
+            )
+                .into_response()
+        }
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "Database not available" })),
+        )
+            .into_response()
+    }
+}
+
+pub async fn handle_api_channels_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    if let Some(db) = &state.config_db {
+        match db.delete_channel(&id) {
+            Ok(_) => Json(serde_json::json!({ "status": "ok" })).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response(),
+        }
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "Database not available" })),
+        )
+            .into_response()
+    }
+}
