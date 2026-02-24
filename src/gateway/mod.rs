@@ -681,7 +681,10 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         // Channels API
         .route("/api/channels", get(api::handle_api_channels_list))
         .route("/api/channels", post(api::handle_api_channels_create))
-        .route("/api/channels/{name}", put(api::handle_api_channel_toggle))
+        .route(
+            "/api/channels/{name}/toggle",
+            put(api::handle_api_channel_toggle),
+        )
         .route("/api/channels/{id}", put(api::handle_api_channels_update))
         .route(
             "/api/channels/{id}",
