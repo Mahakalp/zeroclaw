@@ -304,6 +304,10 @@ pub struct AppState {
     pub cost_tracker: Option<Arc<CostTracker>>,
     /// SSE broadcast channel for real-time events
     pub event_tx: tokio::sync::broadcast::Sender<serde_json::Value>,
+    /// Cloudflare Access JWT authentication enabled
+    pub cf_access_enabled: bool,
+    /// Cloudflare Access public key for JWT validation
+    pub cf_access_public_key: Option<String>,
 }
 
 /// Run the HTTP gateway using axum with proper HTTP/1.1 compliance.
@@ -637,6 +641,12 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         tools_registry,
         cost_tracker,
         event_tx,
+        cf_access_enabled: config.gateway.cf_access_enabled,
+        cf_access_public_key: if config.gateway.cf_access_public_key.is_empty() {
+            None
+        } else {
+            Some(config.gateway.cf_access_public_key)
+        },
     };
 
     // Config PUT needs larger body limit (1MB)
@@ -931,19 +941,40 @@ async fn handle_webhook(
         return (StatusCode::TOO_MANY_REQUESTS, Json(err));
     }
 
-    // ── Bearer token auth (pairing) ──
+    // ── Bearer token auth (pairing) or Cloudflare Access ──
     if state.pairing.require_pairing() {
-        let auth = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        let token = auth.strip_prefix("Bearer ").unwrap_or("");
-        if !state.pairing.is_authenticated(token) {
-            tracing::warn!("Webhook: rejected — not paired / invalid bearer token");
-            let err = serde_json::json!({
-                "error": "Unauthorized — pair first via POST /pair, then send Authorization: Bearer <token>"
-            });
-            return (StatusCode::UNAUTHORIZED, Json(err));
+        // Check Cloudflare Access JWT first (if enabled)
+        let mut authenticated = false;
+        if state.cf_access_enabled {
+            if let Some(ref public_key) = state.cf_access_public_key {
+                if let Some(jwt) = crate::auth::cloudflare_access::extract_cloudflare_jwt(&headers)
+                {
+                    match crate::auth::cloudflare_access::validate_cloudflare_token(
+                        &jwt, public_key,
+                    ) {
+                        crate::auth::cloudflare_access::CloudflareAuthResult::Authenticated(_) => {
+                            authenticated = true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Fall back to bearer token / pairing
+        if !authenticated {
+            let auth = headers
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            let token = auth.strip_prefix("Bearer ").unwrap_or("");
+            if !state.pairing.is_authenticated(token) {
+                tracing::warn!("Webhook: rejected — not paired / invalid bearer token");
+                let err = serde_json::json!({
+                    "error": "Unauthorized — pair first via POST /pair, then send Authorization: Bearer <token>"
+                });
+                return (StatusCode::UNAUTHORIZED, Json(err));
+            }
         }
     }
 

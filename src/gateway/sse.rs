@@ -3,6 +3,9 @@
 //! Wraps the broadcast channel in AppState to deliver events to web dashboard clients.
 
 use super::AppState;
+use crate::auth::cloudflare_access::{
+    extract_cloudflare_jwt, validate_cloudflare_token, CloudflareAuthResult,
+};
 use axum::{
     extract::State,
     http::{header, HeaderMap, StatusCode},
@@ -15,26 +18,47 @@ use std::convert::Infallible;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
+/// Check if request is authenticated via Cloudflare Access or bearer token
+fn is_authenticated(state: &AppState, headers: &HeaderMap) -> bool {
+    // If pairing not required, allow all
+    if !state.pairing.require_pairing() {
+        return true;
+    }
+
+    // Check Cloudflare Access JWT first (if enabled)
+    if state.cf_access_enabled {
+        if let Some(ref public_key) = state.cf_access_public_key {
+            if let Some(jwt) = extract_cloudflare_jwt(headers) {
+                match validate_cloudflare_token(&jwt, public_key) {
+                    CloudflareAuthResult::Authenticated(_) => return true,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // Fall back to bearer token / pairing
+    let token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|auth| auth.strip_prefix("Bearer "))
+        .unwrap_or("");
+
+    state.pairing.is_authenticated(token)
+}
+
 /// GET /api/events — SSE event stream
 pub async fn handle_sse_events(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
     // Auth check
-    if state.pairing.require_pairing() {
-        let token = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|auth| auth.strip_prefix("Bearer "))
-            .unwrap_or("");
-
-        if !state.pairing.is_authenticated(token) {
-            return (
-                StatusCode::UNAUTHORIZED,
-                "Unauthorized — provide Authorization: Bearer <token>",
-            )
-                .into_response();
-        }
+    if !is_authenticated(&state, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "Unauthorized — provide Authorization: Bearer <token>",
+        )
+            .into_response();
     }
 
     let rx = state.event_tx.subscribe();

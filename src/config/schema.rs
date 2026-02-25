@@ -781,6 +781,17 @@ pub struct GatewayConfig {
     /// Maximum distinct idempotency keys retained in memory.
     #[serde(default = "default_gateway_idempotency_max_keys")]
     pub idempotency_max_keys: usize,
+
+    /// Enable Cloudflare Access JWT authentication.
+    /// When enabled, validates CF_Access_JWT cookie or CF-Access-Client-Token header.
+    #[serde(default)]
+    pub cf_access_enabled: bool,
+
+    /// Cloudflare Access public key (PEM format or base64).
+    /// Required if cf_access_enabled is true.
+    /// Can be fetched from: https://{your-domain}/.well-known/cloudflare-access-jwt-parse
+    #[serde(default)]
+    pub cf_access_public_key: String,
 }
 
 fn default_gateway_port() -> u16 {
@@ -829,6 +840,8 @@ impl Default for GatewayConfig {
             rate_limit_max_keys: default_gateway_rate_limit_max_keys(),
             idempotency_ttl_secs: default_idempotency_ttl_secs(),
             idempotency_max_keys: default_gateway_idempotency_max_keys(),
+            cf_access_enabled: false,
+            cf_access_public_key: String::new(),
         }
     }
 }

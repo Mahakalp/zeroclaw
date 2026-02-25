@@ -10,11 +10,15 @@
 //! ```
 
 use super::AppState;
+use crate::auth::cloudflare_access::{
+    extract_cloudflare_jwt, validate_cloudflare_token, CloudflareAuthResult,
+};
 use axum::{
     extract::{
         ws::{Message, WebSocket},
         Query, State, WebSocketUpgrade,
     },
+    http::HeaderMap,
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -25,22 +29,44 @@ pub struct WsQuery {
     pub token: Option<String>,
 }
 
+/// Check if request is authenticated via Cloudflare Access or pairing token
+fn is_authenticated(state: &AppState, headers: &HeaderMap, query_token: Option<&str>) -> bool {
+    // If pairing not required, allow all
+    if !state.pairing.require_pairing() {
+        return true;
+    }
+
+    // Check Cloudflare Access JWT first (if enabled)
+    if state.cf_access_enabled {
+        if let Some(ref public_key) = state.cf_access_public_key {
+            if let Some(jwt) = extract_cloudflare_jwt(headers) {
+                match validate_cloudflare_token(&jwt, public_key) {
+                    CloudflareAuthResult::Authenticated(_) => return true,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // Fall back to bearer token / pairing
+    let token = query_token.unwrap_or("");
+    state.pairing.is_authenticated(token)
+}
+
 /// GET /ws/chat — WebSocket upgrade for agent chat
 pub async fn handle_ws_chat(
     State(state): State<AppState>,
     Query(params): Query<WsQuery>,
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
-    // Auth via query param (browser WebSocket limitation)
-    if state.pairing.require_pairing() {
-        let token = params.token.as_deref().unwrap_or("");
-        if !state.pairing.is_authenticated(token) {
-            return (
-                axum::http::StatusCode::UNAUTHORIZED,
-                "Unauthorized — provide ?token=<bearer_token>",
-            )
-                .into_response();
-        }
+    // Auth via query param or Cloudflare Access JWT
+    if !is_authenticated(&state, &headers, params.token.as_deref()) {
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Unauthorized — provide ?token=<bearer_token>",
+        )
+            .into_response();
     }
 
     ws.on_upgrade(move |socket| handle_socket(socket, state))

@@ -78,6 +78,8 @@ port = 42617
 host = "[::]"
 allow_public_bind = true
 require_pairing = false
+cf_access_enabled = true
+cf_access_public_key = ""
 EOF
 
 # ── Runtime Stage ─────────────────────────────────────────────────

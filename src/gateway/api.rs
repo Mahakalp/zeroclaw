@@ -1,8 +1,12 @@
 //! REST API handlers for the web dashboard.
 //!
-//! All `/api/*` routes require bearer token authentication (PairingGuard).
+//! All `/api/*` routes require bearer token authentication (PairingGuard)
+//! OR Cloudflare Access JWT validation.
 
 use super::AppState;
+use crate::auth::cloudflare_access::{
+    extract_cloudflare_jwt, validate_cloudflare_token, CloudflareAuthResult,
+};
 use axum::{
     extract::{Path, Query, State},
     http::{header, HeaderMap, StatusCode},
@@ -25,10 +29,30 @@ fn require_auth(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    // If pairing is not required, allow all requests
     if !state.pairing.require_pairing() {
         return Ok(());
     }
 
+    // Check for Cloudflare Access JWT first (if enabled)
+    if state.cf_access_enabled {
+        if let Some(ref public_key) = state.cf_access_public_key {
+            if let Some(jwt) = extract_cloudflare_jwt(headers) {
+                match validate_cloudflare_token(&jwt, public_key) {
+                    CloudflareAuthResult::Authenticated(_claims) => {
+                        tracing::debug!("Authenticated via Cloudflare Access JWT");
+                        return Ok(());
+                    }
+                    CloudflareAuthResult::Invalid(e) => {
+                        tracing::warn!("Cloudflare JWT validation failed: {}", e);
+                    }
+                    CloudflareAuthResult::NotPresent => {}
+                }
+            }
+        }
+    }
+
+    // Fall back to bearer token / pairing
     let token = extract_bearer_token(headers).unwrap_or("");
     if state.pairing.is_authenticated(token) {
         Ok(())
