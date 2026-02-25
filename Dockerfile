@@ -5,19 +5,17 @@ FROM rust:1.93-slim@sha256:9663b80a1621253d30b146454f903de48f0af925c967be48c8474
 
 WORKDIR /app
 
-# Install bun for frontend builds
-RUN curl -fsSL https://bun.sh/install | bash && \
-    ln -sf /root/.bun/bin/bun /usr/local/bin/bun
-
-# Verify bun is installed
-RUN /usr/local/bin/bun --version
-
-# Install build dependencies
+# Install build dependencies (curl for bun, pkg-config for rust)
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y \
+        curl \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
+
+# Install bun for frontend builds
+RUN curl -fsSL https://bun.sh/install | bash && \
+    ln -sf /root/.bun/bin/bun /usr/local/bin/bun
 
 # 1. Copy manifests to cache Rust dependencies
 COPY Cargo.toml Cargo.lock ./
