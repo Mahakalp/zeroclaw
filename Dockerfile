@@ -33,11 +33,14 @@ RUN --mount=type=cache,id=zeroclaw-cargo-registry,target=/usr/local/cargo/regist
 RUN rm -rf src benches crates/robot-kit/src
 
 # 2. Copy frontend package files first for dependency caching
-COPY web/package.json web/bun.lock web/
-RUN /usr/local/bin/bun install --frozen-lockfile
+COPY web/package.json web/bun.lock ./web/
+RUN cd web && /usr/local/bin/bun install --frozen-lockfile
 
 # 3. Copy build.rs and trigger frontend build (runs during cargo build)
 COPY build.rs ./
+
+# 4. Copy frontend source (needed for build.rs to build it)
+COPY web/ ./web/
 
 # 4. Copy only build-relevant source paths (avoid cache-busting on docs/tests/scripts)
 COPY src/ src/
