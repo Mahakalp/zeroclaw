@@ -113,3 +113,33 @@ export interface WsMessage {
   output?: string;
   message?: string;
 }
+
+export type SchemaFieldType = 'string' | 'password' | 'number' | 'boolean' | 'array' | 'select';
+
+export interface SchemaField {
+  name: string;
+  type: SchemaFieldType;
+  required: boolean;
+  hint: string;
+  example?: string;
+  options?: { value: string; label: string }[];
+}
+
+export interface Schema {
+  type: string;
+  name: string;
+  description: string;
+  fields: SchemaField[];
+}
+
+export interface ChannelSchema extends Schema {
+  type: string;
+}
+
+export interface ProviderSchema extends Schema {
+  type: string;
+}
+
+export interface SchemaListResponse<T extends Schema = Schema> {
+  types: T[];
+}

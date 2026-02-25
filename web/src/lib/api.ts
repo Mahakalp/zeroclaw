@@ -8,6 +8,8 @@ import type {
   CostSummary,
   CliTool,
   HealthSnapshot,
+  ChannelSchema,
+  ProviderSchema,
 } from '../types/api';
 import { clearToken, getToken, setToken } from './auth';
 
@@ -369,4 +371,24 @@ export function deleteChannel(id: string): Promise<void> {
   return apiFetch<void>(`/api/channels/${id}`, {
     method: 'DELETE',
   });
+}
+
+// ---------------------------------------------------------------------------
+// Schema API
+// ---------------------------------------------------------------------------
+
+export function getChannelSchema(type: string): Promise<ChannelSchema> {
+  return apiFetch<ChannelSchema>(`/api/schema/channels/${encodeURIComponent(type)}`);
+}
+
+export function getAllChannelSchemas(): Promise<{ channels: ChannelSchema[] }> {
+  return apiFetch<{ channels: ChannelSchema[] }>('/api/schema/channels');
+}
+
+export function getProviderSchema(type: string): Promise<ProviderSchema> {
+  return apiFetch<ProviderSchema>(`/api/schema/providers/${encodeURIComponent(type)}`);
+}
+
+export function getAllProviderSchemas(): Promise<{ providers: ProviderSchema[] }> {
+  return apiFetch<{ providers: ProviderSchema[] }>('/api/schema/providers');
 }
