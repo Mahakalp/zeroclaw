@@ -1342,3 +1342,881 @@ pub async fn handle_api_channels_delete(
             .into_response()
     }
 }
+
+// ==================== Provider Schema API ====================
+
+#[derive(serde::Serialize, Clone)]
+pub struct ProviderSchemaField {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
+    pub required: bool,
+    pub hint: String,
+    pub example: Option<String>,
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct ProviderSchema {
+    #[serde(rename = "type")]
+    pub provider_type: String,
+    pub name: String,
+    pub description: String,
+    pub fields: Vec<ProviderSchemaField>,
+}
+
+fn all_provider_schemas() -> Vec<ProviderSchema> {
+    vec![
+        ProviderSchema {
+            provider_type: "openai".to_string(),
+            name: "OpenAI".to_string(),
+            description: "OpenAI API for GPT models".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your OpenAI API key from platform.openai.com".to_string(),
+                    example: Some("sk-...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://api.openai.com/v1)".to_string(),
+                    example: Some("https://api.openai.com/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., gpt-4o, gpt-4o-mini, o1)".to_string(),
+                    example: Some("gpt-4o".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "anthropic".to_string(),
+            name: "Anthropic".to_string(),
+            description: "Anthropic API for Claude models".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Anthropic API key from console.anthropic.com".to_string(),
+                    example: Some("sk-ant-...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://api.anthropic.com)".to_string(),
+                    example: Some("https://api.anthropic.com".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., claude-sonnet-4-20250514, claude-3-5-sonnet-20241022)".to_string(),
+                    example: Some("claude-sonnet-4-20250514".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "google".to_string(),
+            name: "Google".to_string(),
+            description: "Google Gemini API".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Google AI API key from aistudio.google.com/app".to_string(),
+                    example: Some("AIza...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional)".to_string(),
+                    example: None,
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., gemini-2.0-flash, gemini-1.5-pro)".to_string(),
+                    example: Some("gemini-2.0-flash".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "ollama".to_string(),
+            name: "Ollama".to_string(),
+            description: "Local Ollama server".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "API key if Ollama is configured with authentication".to_string(),
+                    example: None,
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Ollama server URL (defaults to http://localhost:11434)".to_string(),
+                    example: Some("http://localhost:11434".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., llama3, mistral, codellama)".to_string(),
+                    example: Some("llama3".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "openrouter".to_string(),
+            name: "OpenRouter".to_string(),
+            description: "Unified API for 200+ LLMs".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your OpenRouter API key from openrouter.ai".to_string(),
+                    example: Some("sk-or-...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://openrouter.ai/api/v1)".to_string(),
+                    example: Some("https://openrouter.ai/api/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., anthropic/claude-3-5-sonnet, openai/gpt-4o)".to_string(),
+                    example: Some("anthropic/claude-3-5-sonnet-20241022".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "groq".to_string(),
+            name: "Groq".to_string(),
+            description: "Fast inference for open and proprietary models".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Groq API key from console.groq.com".to_string(),
+                    example: Some("gsk_...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://api.groq.com/openai)".to_string(),
+                    example: Some("https://api.groq.com/openai".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., llama-3.1-70b-versatile, mixtral-8x7b-32768)".to_string(),
+                    example: Some("llama-3.1-70b-versatile".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "mistral".to_string(),
+            name: "Mistral".to_string(),
+            description: "Mistral AI API".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Mistral API key from console.mistral.ai".to_string(),
+                    example: Some("p-...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://api.mistral.ai/v1)".to_string(),
+                    example: Some("https://api.mistral.ai/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., mistral-large-latest, pixtral-large-latest)".to_string(),
+                    example: Some("mistral-large-latest".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "deepseek".to_string(),
+            name: "DeepSeek".to_string(),
+            description: "DeepSeek API for coding and reasoning models".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your DeepSeek API key from platform.deepseek.com".to_string(),
+                    example: Some("sk-...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://api.deepseek.com)".to_string(),
+                    example: Some("https://api.deepseek.com".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., deepseek-chat, deepseek-coder)".to_string(),
+                    example: Some("deepseek-chat".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "xai".to_string(),
+            name: "xAI".to_string(),
+            description: "xAI Grok API".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your xAI API key from console.x.ai".to_string(),
+                    example: Some("xai-...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://api.x.ai)".to_string(),
+                    example: Some("https://api.x.ai".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., grok-2-1212, grok-2-vision-1212)".to_string(),
+                    example: Some("grok-2-1212".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "together-ai".to_string(),
+            name: "Together AI".to_string(),
+            description: "Managed inference for open models".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Together AI API key from api.together.xyz".to_string(),
+                    example: Some("...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://api.together.xyz)".to_string(),
+                    example: Some("https://api.together.xyz".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., meta-llama/Llama-3.1-70B-Instruct)".to_string(),
+                    example: Some("meta-llama/Llama-3.1-70B-Instruct".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "fireworks".to_string(),
+            name: "Fireworks AI".to_string(),
+            description: "Fast inference for open and custom models".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Fireworks AI API key from fireworks.ai".to_string(),
+                    example: Some("fw_...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://api.fireworks.ai/inference/v1)".to_string(),
+                    example: Some("https://api.fireworks.ai/inference/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., accounts/fireworks/models/llama-v3-70b-instruct)".to_string(),
+                    example: Some("accounts/fireworks/models/llama-v3-70b-instruct".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "perplexity".to_string(),
+            name: "Perplexity".to_string(),
+            description: "AI-powered search and answering".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Perplexity API key from perplexity.ai".to_string(),
+                    example: Some("pplx-...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://api.perplexity.ai)".to_string(),
+                    example: Some("https://api.perplexity.ai".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., llama-3.1-sonar-large-128k-online)".to_string(),
+                    example: Some("llama-3.1-sonar-large-128k-online".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "cohere".to_string(),
+            name: "Cohere".to_string(),
+            description: "Cohere API for command and embed models".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Cohere API key from dashboard.cohere.com".to_string(),
+                    example: Some("...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://api.cohere.com/compatibility)".to_string(),
+                    example: Some("https://api.cohere.com/compatibility".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., command-r-plus, command-r)".to_string(),
+                    example: Some("command-r-plus".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "qwen".to_string(),
+            name: "Qwen".to_string(),
+            description: "Alibaba Qwen models via DashScope".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Qwen/DashScope API key from dashscope.console.aliyun.com".to_string(),
+                    example: Some("sk-...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to regional endpoint)".to_string(),
+                    example: Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., qwen-turbo, qwen-plus, qwen-max)".to_string(),
+                    example: Some("qwen-turbo".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "glm".to_string(),
+            name: "GLM".to_string(),
+            description: "Zhipu/GLM models via bigmodel.cn".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Zhipu/GLM API key from open.bigmodel.cn".to_string(),
+                    example: Some("...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to regional endpoint)".to_string(),
+                    example: Some("https://open.bigmodel.cn/api/paas/v4".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., glm-4, glm-4-flash)".to_string(),
+                    example: Some("glm-4-flash".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "moonshot".to_string(),
+            name: "Moonshot".to_string(),
+            description: "Moonshot Kimi API".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Moonshot/Kimi API key from platform.moonshot.ai".to_string(),
+                    example: Some("...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to regional endpoint)".to_string(),
+                    example: Some("https://api.moonshot.ai/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., moonshot-v1-8k, moonshot-v1-128k)".to_string(),
+                    example: Some("moonshot-v1-8k".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "minimax".to_string(),
+            name: "MiniMax".to_string(),
+            description: "MiniMax API".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your MiniMax API key from platform.minimax.io".to_string(),
+                    example: Some("...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to regional endpoint)".to_string(),
+                    example: Some("https://api.minimax.io/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., MiniMax-M2.1, MiniMax-M2.5)".to_string(),
+                    example: Some("MiniMax-M2.1".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "bedrock".to_string(),
+            name: "AWS Bedrock".to_string(),
+            description: "Amazon Bedrock managed models".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "AWS credentials (access key) - typically uses AWS credentials chain instead".to_string(),
+                    example: None,
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional)".to_string(),
+                    example: None,
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., anthropic.claude-3-sonnet-20240229-v1:0)".to_string(),
+                    example: Some("anthropic.claude-3-sonnet-20240229-v1:0".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "telnyx".to_string(),
+            name: "Telnyx".to_string(),
+            description: "Telnyx AI API".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Telnyx API key from portal.telnyx.com".to_string(),
+                    example: Some("KEY...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional)".to_string(),
+                    example: None,
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use".to_string(),
+                    example: None,
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "copilot".to_string(),
+            name: "GitHub Copilot".to_string(),
+            description: "GitHub Copilot for CLI".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your GitHub Copilot token from github.com/settings/tokens".to_string(),
+                    example: Some("ghp_...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional)".to_string(),
+                    example: None,
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use".to_string(),
+                    example: None,
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "nvidia".to_string(),
+            name: "NVIDIA NIM".to_string(),
+            description: "NVIDIA NIM inference endpoints".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your NVIDIA API key from build.nvidia.com".to_string(),
+                    example: Some("nvapi-...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://integrate.api.nvidia.com/v1)".to_string(),
+                    example: Some("https://integrate.api.nvidia.com/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use (e.g., meta/llama-3.1-70b-instruct)".to_string(),
+                    example: Some("meta/llama-3.1-70b-instruct".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "phi4".to_string(),
+            name: "Phi-4".to_string(),
+            description: "Microsoft Phi-4 via Azure AI Foundry".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Azure AI Foundry API key".to_string(),
+                    example: Some("...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Azure endpoint URL (e.g., https://<resource>.services.ai.azure.com)".to_string(),
+                    example: Some("https://example.services.ai.azure.com".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use".to_string(),
+                    example: Some("phi-4".to_string()),
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "lmstudio".to_string(),
+            name: "LM Studio".to_string(),
+            description: "Local LM Studio server".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "API key if LM Studio is configured with authentication (defaults to lm-studio)".to_string(),
+                    example: Some("lm-studio".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "LM Studio server URL (defaults to http://localhost:1234/v1)".to_string(),
+                    example: Some("http://localhost:1234/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use".to_string(),
+                    example: None,
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "llamacpp".to_string(),
+            name: "llama.cpp".to_string(),
+            description: "Local llama.cpp server".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "API key if server requires authentication (defaults to llama.cpp)".to_string(),
+                    example: Some("llama.cpp".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "llama.cpp server URL (defaults to http://localhost:8080/v1)".to_string(),
+                    example: Some("http://localhost:8080/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use".to_string(),
+                    example: None,
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "sglang".to_string(),
+            name: "SGLang".to_string(),
+            description: "Local SGLang server".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "API key if server requires authentication".to_string(),
+                    example: None,
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "SGLang server URL (defaults to http://localhost:30000/v1)".to_string(),
+                    example: Some("http://localhost:30000/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use".to_string(),
+                    example: None,
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "vllm".to_string(),
+            name: "vLLM".to_string(),
+            description: "Local vLLM server".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "API key if server requires authentication".to_string(),
+                    example: None,
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "vLLM server URL (defaults to http://localhost:8000/v1)".to_string(),
+                    example: Some("http://localhost:8000/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use".to_string(),
+                    example: None,
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "vercel".to_string(),
+            name: "Vercel AI Gateway".to_string(),
+            description: "Vercel AI Gateway for model aggregation".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Vercel AI Gateway token".to_string(),
+                    example: Some("...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://ai-gateway.vercel.sh/v1)".to_string(),
+                    example: Some("https://ai-gateway.vercel.sh/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use".to_string(),
+                    example: None,
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "cloudflare".to_string(),
+            name: "Cloudflare AI Gateway".to_string(),
+            description: "Cloudflare AI Gateway".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Cloudflare API token".to_string(),
+                    example: Some("...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://gateway.ai.cloudflare.com/v1)".to_string(),
+                    example: Some("https://gateway.ai.cloudflare.com/v1".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use".to_string(),
+                    example: None,
+                },
+            ],
+        },
+        ProviderSchema {
+            provider_type: "venice".to_string(),
+            name: "Venice".to_string(),
+            description: "Venice AI API".to_string(),
+            fields: vec![
+                ProviderSchemaField {
+                    name: "api_key".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Venice API key from venice.ai".to_string(),
+                    example: Some("...".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "api_url".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Custom API endpoint (optional, defaults to https://api.venice.ai)".to_string(),
+                    example: Some("https://api.venice.ai".to_string()),
+                },
+                ProviderSchemaField {
+                    name: "default_model".to_string(),
+                    field_type: "string".to_string(),
+                    required: false,
+                    hint: "Default model to use".to_string(),
+                    example: None,
+                },
+            ],
+        },
+    ]
+}
+
+pub async fn handle_api_schema_providers_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    let schemas = all_provider_schemas();
+    Json(serde_json::json!({ "providers": schemas })).into_response()
+}
+
+pub async fn handle_api_schema_provider_get(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(provider_type): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    let schemas = all_provider_schemas();
+    let provider_type_lower = provider_type.to_lowercase();
+
+    if let Some(schema) = schemas
+        .into_iter()
+        .find(|s| s.provider_type == provider_type_lower)
+    {
+        Json(schema).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(
+                serde_json::json!({ "error": format!("Unknown provider type: {}", provider_type) }),
+            ),
+        )
+            .into_response()
+    }
+}
