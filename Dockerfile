@@ -31,13 +31,10 @@ COPY src/ src/
 COPY benches/ benches/
 COPY crates/ crates/
 COPY firmware/ firmware/
-COPY web/ web/
 
-# Build frontend if not already present
-RUN if [ ! -f web/dist/index.html ]; then \
-      apt-get update && apt-get install -y nodejs npm && \
-      cd web && npm install && npm run build; \
-    fi
+# Copy web/dist if it exists, otherwise fail the build
+COPY web/ web/
+RUN test -f web/dist/index.html || (echo "ERROR: Frontend not built. Run 'cd web && npm run build' first" && exit 1)
 
 RUN --mount=type=cache,id=zeroclaw-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=zeroclaw-cargo-git,target=/usr/local/cargo/git,sharing=locked \
