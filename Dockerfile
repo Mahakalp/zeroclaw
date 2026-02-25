@@ -6,9 +6,11 @@ FROM rust:1.93-slim@sha256:9663b80a1621253d30b146454f903de48f0af925c967be48c8474
 WORKDIR /app
 
 # Install bun for frontend builds
-RUN curl -fsSL https://bun.sh/install | bash
-ENV BUN_INSTALL="/root/.bun"
-ENV PATH="$BUN_INSTALL/bin:$PATH"
+RUN curl -fsSL https://bun.sh/install | bash && \
+    ln -sf /root/.bun/bin/bun /usr/local/bin/bun
+
+# Verify bun is installed
+RUN /usr/local/bin/bun --version
 
 # Install build dependencies
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -33,7 +35,7 @@ RUN rm -rf src benches crates/robot-kit/src
 
 # 2. Copy frontend package files first for dependency caching
 COPY web/package.json web/bun.lock web/
-RUN bun install --frozen-lockfile
+RUN /usr/local/bin/bun install --frozen-lockfile
 
 # 3. Copy build.rs and trigger frontend build (runs during cargo build)
 COPY build.rs ./
