@@ -1364,6 +1364,142 @@ pub struct ProviderSchema {
     pub fields: Vec<ProviderSchemaField>,
 }
 
+#[derive(serde::Serialize, Clone)]
+pub struct ChannelSchemaField {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
+    pub required: bool,
+    pub hint: String,
+    pub example: Option<String>,
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct ChannelSchema {
+    #[serde(rename = "type")]
+    pub channel_type: String,
+    pub name: String,
+    pub description: String,
+    pub fields: Vec<ChannelSchemaField>,
+}
+
+fn all_channel_schemas() -> Vec<ChannelSchema> {
+    vec![
+        ChannelSchema {
+            channel_type: "cli".to_string(),
+            name: "CLI".to_string(),
+            description: "Command-line interface (always enabled)".to_string(),
+            fields: vec![],
+        },
+        ChannelSchema {
+            channel_type: "telegram".to_string(),
+            name: "Telegram".to_string(),
+            description: "Connect your Telegram bot".to_string(),
+            fields: vec![
+                ChannelSchemaField {
+                    name: "bot_token".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Get from @BotFather on Telegram".to_string(),
+                    example: Some("123456:ABC-DEF1234ghIkl-zyx57W2vT6EH11".to_string()),
+                },
+                ChannelSchemaField {
+                    name: "allowed_users".to_string(),
+                    field_type: "array".to_string(),
+                    required: false,
+                    hint: "User IDs that can interact with the bot".to_string(),
+                    example: Some("[\"123456789\"]".to_string()),
+                },
+            ],
+        },
+        ChannelSchema {
+            channel_type: "discord".to_string(),
+            name: "Discord".to_string(),
+            description: "Connect your Discord bot".to_string(),
+            fields: vec![ChannelSchemaField {
+                name: "bot_token".to_string(),
+                field_type: "string".to_string(),
+                required: true,
+                hint: "Your Discord bot token".to_string(),
+                example: Some("MTEw...".to_string()),
+            }],
+        },
+        ChannelSchema {
+            channel_type: "slack".to_string(),
+            name: "Slack".to_string(),
+            description: "Connect your Slack app".to_string(),
+            fields: vec![ChannelSchemaField {
+                name: "bot_token".to_string(),
+                field_type: "string".to_string(),
+                required: true,
+                hint: "Your Slack bot token (xoxb-...)".to_string(),
+                example: Some("xoxb-...".to_string()),
+            }],
+        },
+        ChannelSchema {
+            channel_type: "webhook".to_string(),
+            name: "Webhook".to_string(),
+            description: "Receive messages via HTTP webhook".to_string(),
+            fields: vec![ChannelSchemaField {
+                name: "port".to_string(),
+                field_type: "number".to_string(),
+                required: true,
+                hint: "Port number for the webhook server".to_string(),
+                example: Some("8080".to_string()),
+            }],
+        },
+        ChannelSchema {
+            channel_type: "matrix".to_string(),
+            name: "Matrix".to_string(),
+            description: "Connect to Matrix protocol".to_string(),
+            fields: vec![
+                ChannelSchemaField {
+                    name: "homeserver".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Matrix homeserver URL".to_string(),
+                    example: Some("https://matrix.org".to_string()),
+                },
+                ChannelSchemaField {
+                    name: "access_token".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Your Matrix access token".to_string(),
+                    example: Some("syt_...".to_string()),
+                },
+                ChannelSchemaField {
+                    name: "room_id".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Room ID to join".to_string(),
+                    example: Some("!room:matrix.org".to_string()),
+                },
+            ],
+        },
+        ChannelSchema {
+            channel_type: "irc".to_string(),
+            name: "IRC".to_string(),
+            description: "Connect to IRC servers".to_string(),
+            fields: vec![
+                ChannelSchemaField {
+                    name: "server".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "IRC server hostname".to_string(),
+                    example: Some("irc.libera.chat".to_string()),
+                },
+                ChannelSchemaField {
+                    name: "nickname".to_string(),
+                    field_type: "string".to_string(),
+                    required: true,
+                    hint: "Nickname to use".to_string(),
+                    example: Some("ZeroClawBot".to_string()),
+                },
+            ],
+        },
+    ]
+}
+
 fn all_provider_schemas() -> Vec<ProviderSchema> {
     vec![
         ProviderSchema {
@@ -2216,6 +2352,44 @@ pub async fn handle_api_schema_provider_get(
             Json(
                 serde_json::json!({ "error": format!("Unknown provider type: {}", provider_type) }),
             ),
+        )
+            .into_response()
+    }
+}
+
+pub async fn handle_api_schema_channels_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    let schemas = all_channel_schemas();
+    Json(serde_json::json!({ "channels": schemas })).into_response()
+}
+
+pub async fn handle_api_schema_channel_get(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(channel_type): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    let schemas = all_channel_schemas();
+    let channel_type_lower = channel_type.to_lowercase();
+
+    if let Some(schema) = schemas
+        .into_iter()
+        .find(|s| s.channel_type == channel_type_lower)
+    {
+        Json(schema).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("Unknown channel type: {}", channel_type) })),
         )
             .into_response()
     }

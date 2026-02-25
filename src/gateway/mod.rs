@@ -716,6 +716,15 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
             "/api/schema/providers/{type}",
             get(api::handle_api_schema_provider_get),
         )
+        // ── Channel Schema API ──
+        .route(
+            "/api/schema/channels",
+            get(api::handle_api_schema_channels_list),
+        )
+        .route(
+            "/api/schema/channels/{type}",
+            get(api::handle_api_schema_channel_get),
+        )
         // ── SSE event stream ──
         .route("/api/events", get(sse::handle_sse_events))
         // ── WebSocket agent chat ──
