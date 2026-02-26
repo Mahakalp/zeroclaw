@@ -63,11 +63,10 @@ RUN --mount=type=cache,id=zeroclaw-cargo-registry,target=/usr/local/cargo/regist
 RUN test -f web/dist/index.html || (echo "Frontend not embedded in binary" && exit 1)
 
 # Prepare runtime directory structure and default config inline (no extra stage)
-RUN mkdir -p /zeroclaw-data/.zeroclaw /zeroclaw-data/workspace && \
-    cat > /zeroclaw-data/.zeroclaw/config.toml <<EOF && \
-    chown -R 65534:65534 /zeroclaw-data
+RUN mkdir -p /zeroclaw-data /zeroclaw-data/workspace && \
+    cat > /zeroclaw-data/config.toml <<EOF
 workspace_dir = "/zeroclaw-data/workspace"
-config_path = "/zeroclaw-data/.zeroclaw/config.toml"
+config_path = "/zeroclaw-data/config.toml"
 api_key = ""
 default_provider = "openrouter"
 default_model = "anthropic/claude-sonnet-4-20250514"
@@ -82,7 +81,7 @@ cf_access_public_key = "-----BEGIN CERTIFICATE-----\nMIIDTTCCAjWgAwIBAgIRAOR+u17
 EOF
 
 # ── Runtime Stage ─────────────────────────────────────────────────
-FROM gcr.io/distroless/cc-debian13:nonroot
+FROM gcr.io/distroless/cc-debian13
 
 # Copy binary from builder
 COPY --from=builder /app/zeroclaw /usr/local/bin/zeroclaw
@@ -91,11 +90,8 @@ COPY --from=builder /zeroclaw-data /zeroclaw-data
 
 WORKDIR /
 
-# Run as non-root user
-USER nonroot
-
 # Expose gateway port
 EXPOSE 42617
 
 ENTRYPOINT ["zeroclaw"]
-CMD ["gateway"]
+CMD ["daemon"]
