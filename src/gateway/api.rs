@@ -880,15 +880,19 @@ pub async fn handle_api_provider_models(
 fn mask_sensitive_fields(toml_str: &str) -> String {
     let mut output = String::with_capacity(toml_str.len());
     for line in toml_str.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("api_key")
-            || trimmed.starts_with("bot_token")
-            || trimmed.starts_with("access_token")
-            || trimmed.starts_with("secret")
-            || trimmed.starts_with("app_secret")
-            || trimmed.starts_with("signing_secret")
-        {
-            if let Some(eq_pos) = line.find('=') {
+        if let Some(eq_pos) = line.find('=') {
+            let key = line[..eq_pos].trim();
+            let should_mask = matches!(
+                key,
+                "api_key"
+                    | "bot_token"
+                    | "access_token"
+                    | "secret"
+                    | "app_secret"
+                    | "signing_secret"
+            );
+
+            if should_mask {
                 output.push_str(&line[..eq_pos + 1]);
                 output.push_str(" \"***MASKED***\"");
             } else {

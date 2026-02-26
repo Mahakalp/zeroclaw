@@ -145,6 +145,7 @@ function isProviderKey(key: string): boolean {
 function parseCurrentConfig(configToml: string, channelKey: string): Record<string, string> {
   const result: Record<string, string> = {};
   const lines = configToml.split('\n');
+  const MASKED = '***MASKED***';
   
   if (isProviderKey(channelKey)) {
     for (const line of lines) {
@@ -160,7 +161,11 @@ function parseCurrentConfig(configToml: string, channelKey: string): Record<stri
           value = value.slice(1, -1);
         }
         
-        if (key === 'api_key' || key === 'api_url' || key === 'default_model' || key === 'default_provider') {
+        if (value === MASKED) {
+          value = '';
+        }
+
+        if (key === 'api_key' || key === 'api_url' || key === 'default_model') {
           result[key] = value;
         }
       }
@@ -196,6 +201,10 @@ function parseCurrentConfig(configToml: string, channelKey: string): Record<stri
         
         if (value.startsWith('[') && value.endsWith(']')) {
           value = value.slice(1, -1).split(',').map(v => v.trim().replace(/^"|"$/g, '')).join(', ');
+        }
+
+        if (value === MASKED) {
+          value = '';
         }
         
         currentField = key;
@@ -305,11 +314,21 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
     setError(null);
     
     try {
-      const newConfig = generateChannelConfig(channelKey, values, configToml);
+      const allowedFieldKeys = new Set(fields.map((f) => fieldNameToKey(f.label)));
+      const sanitizedValues = Object.fromEntries(
+        Object.entries(values).filter(([k, v]) => allowedFieldKeys.has(k) && v !== '***MASKED***')
+      );
+
+      const newConfig = generateChannelConfig(channelKey, sanitizedValues, configToml);
       await putConfig(newConfig);
       onSaved();
       onClose();
     } catch (err) {
+      console.error('ChannelConfigModal: save failed', {
+        channelKey,
+        valueKeys: Object.keys(values),
+        error: err,
+      });
       setError(err instanceof Error ? err.message : 'Failed to save config');
     } finally {
       setSaving(false);
