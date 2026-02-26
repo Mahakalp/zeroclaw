@@ -84,6 +84,9 @@ jobs:
             echo "=== Pulling custom image: $IMAGE ==="
             docker pull $IMAGE || exit 1
             
+            echo "=== Remove old invalid config (if exists) ==="
+            rm -f ~/.zeroclaw/config.toml 2>/dev/null || true
+            
             echo "=== Stopping existing container ==="
             docker stop zeroclaw 2>/dev/null || true
             docker rm zeroclaw 2>/dev/null || true
