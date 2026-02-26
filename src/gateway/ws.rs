@@ -102,6 +102,34 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             continue;
         }
 
-        // ... rest of the handler would go here
+        match super::run_gateway_chat_with_tools(&state, &content).await {
+            Ok(response) => {
+                let done = serde_json::json!({
+                    "type": "done",
+                    "full_response": response,
+                });
+                if sender
+                    .send(Message::Text(done.to_string().into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Err(e) => {
+                let message = crate::providers::sanitize_api_error(&e.to_string());
+                let err = serde_json::json!({
+                    "type": "error",
+                    "message": message,
+                });
+                if sender
+                    .send(Message::Text(err.to_string().into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }
     }
 }
