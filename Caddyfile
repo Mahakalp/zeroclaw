@@ -1,0 +1,64 @@
+{
+    default_sni mahakalp.dev
+}
+
+(cloudflare_tls) {
+    tls /etc/caddy/certs/cloudflare-origin.pem /etc/caddy/certs/cloudflare-origin.key
+}
+
+(security_headers) {
+    header {
+        Strict-Transport-Security max-age=31536000
+        X-Content-Type-Options nosniff
+        X-Frame-Options SAMEORIGIN
+        Referrer-Policy strict-origin-when-cross-origin
+        -Server
+    }
+}
+
+code.mahakalp.dev {
+    import cloudflare_tls
+    import security_headers
+    reverse_proxy forgejo:3000
+}
+
+status.mahakalp.dev {
+    import cloudflare_tls
+    import security_headers
+    reverse_proxy gatus:8080
+}
+
+analytics.mahakalp.dev {
+    import cloudflare_tls
+    import security_headers
+    reverse_proxy umami:3000
+}
+
+draw.mahakalp.dev {
+    import cloudflare_tls
+    import security_headers
+    handle_path /ws/* {
+        reverse_proxy excalidraw-room:80
+    }
+    reverse_proxy sharada:3000
+}
+
+pm.mahakalp.dev {
+    import cloudflare_tls
+    import security_headers
+    reverse_proxy youtrack:8080
+}
+
+docs.mahakalp.dev {
+    import cloudflare_tls
+    import security_headers
+    reverse_proxy outline:3000
+}
+
+claw.mahakalp.dev {
+    import cloudflare_tls
+    import security_headers
+    reverse_proxy zeroclaw:42617 {
+        header_up Cf-Access-Jwt-Assertion
+    }
+}
