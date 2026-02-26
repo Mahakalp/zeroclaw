@@ -837,6 +837,12 @@ pub(super) async fn run_gateway_chat_with_tools(
                         .is_some_and(|m| !m.trim().is_empty())
                     {
                         config.default_model = provider.default_model.clone();
+                    } else if config
+                        .default_model
+                        .as_deref()
+                        .is_some_and(|m| !model_matches_provider(m, &provider.name))
+                    {
+                        config.default_model = None;
                     }
                     if provider
                         .api_key
@@ -860,6 +866,19 @@ pub(super) async fn run_gateway_chat_with_tools(
     // Stabilization mode: keep provider selection explicit (no automatic fallback chain).
     config.reliability.fallback_providers.clear();
     crate::agent::process_message(config, message).await
+}
+
+fn model_matches_provider(model: &str, provider: &str) -> bool {
+    let m = model.to_lowercase();
+    match provider {
+        "google" | "gemini" => m.starts_with("google/") || m.starts_with("gemini"),
+        "anthropic" => m.starts_with("anthropic/") || m.starts_with("claude"),
+        "openai" => m.starts_with("openai/") || m.starts_with("gpt-") || m.starts_with("o1"),
+        "openrouter" => m.contains('/'),
+        "deepseek" => m.starts_with("deepseek/"),
+        "xai" | "x-ai" => m.starts_with("x-ai/") || m.starts_with("grok"),
+        _ => true,
+    }
 }
 
 /// Webhook request body
