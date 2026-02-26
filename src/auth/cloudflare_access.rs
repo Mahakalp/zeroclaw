@@ -6,6 +6,13 @@
 
 use serde::Deserialize;
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum CloudflareAudience {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
 /// Claims extracted from Cloudflare Access JWT.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CloudflareClaims {
@@ -16,7 +23,7 @@ pub struct CloudflareClaims {
     /// Issuer - should be https://<team>.cloudflareaccess.com
     pub iss: Option<String>,
     /// Audience - should match the Application AUD tag
-    pub aud: Option<String>,
+    pub aud: Option<CloudflareAudience>,
     /// Expiration timestamp
     pub exp: Option<i64>,
     /// Issued at timestamp
@@ -106,10 +113,20 @@ pub fn validate_cloudflare_token(
     // Validate audience if provided
     if let Some(expected_aud) = aud_tag {
         if let Some(aud) = &claims.aud {
-            if aud != expected_aud {
+            let aud_ok = match aud {
+                CloudflareAudience::Single(aud) => aud == expected_aud,
+                CloudflareAudience::Multiple(audiences) => {
+                    audiences.iter().any(|aud| aud == expected_aud)
+                }
+            };
+            if !aud_ok {
+                let got = match aud {
+                    CloudflareAudience::Single(aud) => aud.clone(),
+                    CloudflareAudience::Multiple(audiences) => audiences.join(","),
+                };
                 return CloudflareAuthResult::Invalid(format!(
                     "Invalid audience: expected {}, got {}",
-                    expected_aud, aud
+                    expected_aud, got
                 ));
             }
         } else {
@@ -170,7 +187,25 @@ fn parse_rsa_public_key(pem: &str) -> Result<Vec<u8>, String> {
     let header = "-----BEGIN PUBLIC KEY-----";
     let footer = "-----END PUBLIC KEY-----";
 
+    if pem.contains("-----BEGIN CERTIFICATE-----") {
+        return Err(
+            "cf_access_public_key contains a CERTIFICATE PEM; expected a PUBLIC KEY PEM"
+                .to_string(),
+        );
+    }
+
     if !pem.contains(header) {
+        use base64::Engine;
+        let standard = base64::engine::general_purpose::STANDARD;
+
+        if let Ok(decoded) = standard.decode(pem) {
+            return Ok(decoded);
+        }
+
+        if let Ok(decoded) = decode_base64_url(pem) {
+            return Ok(decoded);
+        }
+
         return Ok(pem.as_bytes().to_vec());
     }
 
@@ -178,6 +213,17 @@ fn parse_rsa_public_key(pem: &str) -> Result<Vec<u8>, String> {
     let end = pem.find(footer).map(|i| i).unwrap_or(pem.len());
 
     let encoded = pem[start..end].trim();
+
+    // PEM bodies use standard base64 (with '+' and '/' chars, often padded).
+    // Keep a URL-safe fallback in case operators paste URL-safe encoded DER.
+    {
+        use base64::Engine;
+        let standard = base64::engine::general_purpose::STANDARD;
+        if let Ok(decoded) = standard.decode(encoded) {
+            return Ok(decoded);
+        }
+    }
+
     decode_base64_url(encoded)
 }
 
@@ -267,5 +313,32 @@ mod tests {
 
         headers.insert("CF_Access_JWT", "test.jwt".parse().unwrap());
         assert!(has_cloudflare_access_headers(&headers));
+    }
+
+    #[test]
+    fn test_parse_rsa_public_key_accepts_standard_pem_base64() {
+        let pem = "-----BEGIN PUBLIC KEY-----\nAQIDBA==\n-----END PUBLIC KEY-----";
+        let parsed = parse_rsa_public_key(pem).expect("pem parse should succeed");
+        assert_eq!(parsed, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_validate_audience_with_array_claim() {
+        let claims: CloudflareClaims = serde_json::from_str(r#"{"aud":["aud-a","aud-b"]}"#)
+            .expect("claims parse should succeed");
+
+        let aud_ok = match claims.aud {
+            Some(CloudflareAudience::Multiple(v)) => v.iter().any(|a| a == "aud-b"),
+            _ => false,
+        };
+
+        assert!(aud_ok);
+    }
+
+    #[test]
+    fn test_parse_rsa_public_key_rejects_certificate_pem() {
+        let cert = "-----BEGIN CERTIFICATE-----\nAQIDBA==\n-----END CERTIFICATE-----";
+        let err = parse_rsa_public_key(cert).expect_err("certificate pem should be rejected");
+        assert!(err.contains("expected a PUBLIC KEY PEM"));
     }
 }
