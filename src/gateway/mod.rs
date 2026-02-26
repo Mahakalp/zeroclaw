@@ -18,7 +18,7 @@ use crate::cost::CostTracker;
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::providers::{self, ChatMessage, Provider};
 use crate::runtime;
-use crate::security::pairing::{constant_time_eq, is_public_bind, PairingGuard};
+use crate::security::pairing::{constant_time_eq, is_public_bind};
 use crate::security::SecurityPolicy;
 use crate::tools;
 use crate::tools::traits::ToolSpec;
@@ -150,21 +150,15 @@ impl SlidingWindowRateLimiter {
 
 #[derive(Debug)]
 pub struct GatewayRateLimiter {
-    pair: SlidingWindowRateLimiter,
     webhook: SlidingWindowRateLimiter,
 }
 
 impl GatewayRateLimiter {
-    fn new(pair_per_minute: u32, webhook_per_minute: u32, max_keys: usize) -> Self {
+    fn new(webhook_per_minute: u32, max_keys: usize) -> Self {
         let window = Duration::from_secs(RATE_LIMIT_WINDOW_SECS);
         Self {
-            pair: SlidingWindowRateLimiter::new(pair_per_minute, window, max_keys),
             webhook: SlidingWindowRateLimiter::new(webhook_per_minute, window, max_keys),
         }
-    }
-
-    fn allow_pair(&self, key: &str) -> bool {
-        self.pair.allow(key)
     }
 
     fn allow_webhook(&self, key: &str) -> bool {
@@ -283,7 +277,6 @@ pub struct AppState {
     pub auto_save: bool,
     /// SHA-256 hash of `X-Webhook-Secret` (hex-encoded), never plaintext.
     pub webhook_secret_hash: Option<Arc<str>>,
-    pub pairing: Arc<PairingGuard>,
     pub trust_forwarded_headers: bool,
     pub rate_limiter: Arc<GatewayRateLimiter>,
     pub idempotency_store: Arc<IdempotencyStore>,
@@ -528,17 +521,11 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
             })
             .map(Arc::from);
 
-    // ── Pairing guard ──────────────────────────────────────
-    let pairing = Arc::new(PairingGuard::new(
-        config.gateway.require_pairing,
-        &config.gateway.paired_tokens,
-    ));
     let rate_limit_max_keys = normalize_max_keys(
         config.gateway.rate_limit_max_keys,
         RATE_LIMIT_MAX_KEYS_DEFAULT,
     );
     let rate_limiter = Arc::new(GatewayRateLimiter::new(
-        config.gateway.pair_rate_limit_per_minute,
         config.gateway.webhook_rate_limit_per_minute,
         rate_limit_max_keys,
     ));
@@ -571,10 +558,14 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
 
     println!("🦀 ZeroClaw Gateway listening on http://{display_addr}");
     if let Some(ref url) = tunnel_url {
-        println!("  🌐 Public URL: {url}");
+        println!("🌐 Tunnel active: {url}");
     }
     println!("  🌐 Web Dashboard: http://{display_addr}/");
-    println!("  POST /pair      — pair a new client (X-Pairing-Code header)");
+    if config.gateway.cf_access_enabled {
+        println!("  🔐 Authentication: Cloudflare Access");
+    } else {
+        println!("  🔓 Authentication: Disabled (cf_access_enabled = false)");
+    }
     println!("  POST /webhook   — {{\"message\": \"your prompt\"}}");
     if whatsapp_channel.is_some() {
         println!("  GET  /whatsapp  — Meta webhook verification");
@@ -586,22 +577,10 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     if nextcloud_talk_channel.is_some() {
         println!("  POST /nextcloud-talk — Nextcloud Talk bot webhook");
     }
-    println!("  GET  /api/*     — REST API (bearer token required)");
+    println!("  GET  /api/*     — REST API");
     println!("  GET  /ws/chat   — WebSocket agent chat");
     println!("  GET  /health    — health check");
     println!("  GET  /metrics   — Prometheus metrics");
-    if let Some(code) = pairing.pairing_code() {
-        println!();
-        println!("  🔐 PAIRING REQUIRED — use this one-time code:");
-        println!("     ┌──────────────┐");
-        println!("     │  {code}  │");
-        println!("     └──────────────┘");
-        println!("     Send: POST /pair with header X-Pairing-Code: {code}");
-    } else if pairing.require_pairing() {
-        println!("  🔒 Pairing: ACTIVE (bearer token required)");
-    } else {
-        println!("  ⚠️  Pairing: DISABLED (all requests accepted)");
-    }
     println!("  Press Ctrl+C to stop.\n");
 
     crate::health::mark_component_ok("gateway");
@@ -627,7 +606,6 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         mem,
         auto_save: config.memory.auto_save,
         webhook_secret_hash,
-        pairing,
         trust_forwarded_headers: config.gateway.trust_forwarded_headers,
         rate_limiter,
         idempotency_store,
@@ -659,7 +637,6 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         // ── Existing routes ──
         .route("/health", get(handle_health))
         .route("/metrics", get(handle_metrics))
-        .route("/pair", post(handle_pair))
         .route("/webhook", post(handle_webhook))
         .route("/whatsapp", get(handle_whatsapp_verify))
         .route("/whatsapp", post(handle_whatsapp_message))
@@ -770,8 +747,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
 async fn handle_health(State(state): State<AppState>) -> impl IntoResponse {
     let body = serde_json::json!({
         "status": "ok",
-        "paired": state.pairing.is_paired(),
-        "require_pairing": state.pairing.require_pairing(),
+        "cf_access_enabled": state.cf_access_enabled,
         "runtime": crate::health::snapshot_json(),
     });
     Json(body)
@@ -798,85 +774,6 @@ async fn handle_metrics(State(state): State<AppState>) -> impl IntoResponse {
         [(header::CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE)],
         body,
     )
-}
-
-/// POST /pair — exchange one-time code for bearer token
-#[axum::debug_handler]
-async fn handle_pair(
-    State(state): State<AppState>,
-    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
-    let rate_key =
-        client_key_from_request(Some(peer_addr), &headers, state.trust_forwarded_headers);
-    if !state.rate_limiter.allow_pair(&rate_key) {
-        tracing::warn!("/pair rate limit exceeded");
-        let err = serde_json::json!({
-            "error": "Too many pairing requests. Please retry later.",
-            "retry_after": RATE_LIMIT_WINDOW_SECS,
-        });
-        return (StatusCode::TOO_MANY_REQUESTS, Json(err));
-    }
-
-    let code = headers
-        .get("X-Pairing-Code")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-
-    match state.pairing.try_pair(code, &rate_key).await {
-        Ok(Some(token)) => {
-            tracing::info!("🔐 New client paired successfully");
-            if let Err(err) = persist_pairing_tokens(state.config.clone(), &state.pairing).await {
-                tracing::error!("🔐 Pairing succeeded but token persistence failed: {err:#}");
-                let body = serde_json::json!({
-                    "paired": true,
-                    "persisted": false,
-                    "token": token,
-                    "message": "Paired for this process, but failed to persist token to config.toml. Check config path and write permissions.",
-                });
-                return (StatusCode::OK, Json(body));
-            }
-
-            let body = serde_json::json!({
-                "paired": true,
-                "persisted": true,
-                "token": token,
-                "message": "Save this token — use it as Authorization: Bearer <token>"
-            });
-            (StatusCode::OK, Json(body))
-        }
-        Ok(None) => {
-            tracing::warn!("🔐 Pairing attempt with invalid code");
-            let err = serde_json::json!({"error": "Invalid pairing code"});
-            (StatusCode::FORBIDDEN, Json(err))
-        }
-        Err(lockout_secs) => {
-            tracing::warn!(
-                "🔐 Pairing locked out — too many failed attempts ({lockout_secs}s remaining)"
-            );
-            let err = serde_json::json!({
-                "error": format!("Too many failed attempts. Try again in {lockout_secs}s."),
-                "retry_after": lockout_secs
-            });
-            (StatusCode::TOO_MANY_REQUESTS, Json(err))
-        }
-    }
-}
-
-async fn persist_pairing_tokens(config: Arc<Mutex<Config>>, pairing: &PairingGuard) -> Result<()> {
-    let paired_tokens = pairing.tokens();
-    // This is needed because parking_lot's guard is not Send so we clone the inner
-    // this should be removed once async mutexes are used everywhere
-    let mut updated_cfg = { config.lock().clone() };
-    updated_cfg.gateway.paired_tokens = paired_tokens;
-    updated_cfg
-        .save()
-        .await
-        .context("Failed to persist paired tokens to config.toml")?;
-
-    // Keep shared runtime config in sync with persisted tokens.
-    *config.lock() = updated_cfg;
-    Ok(())
 }
 
 /// Simple chat for webhook endpoint (no tools, for backward compatibility and testing).
@@ -941,44 +838,25 @@ async fn handle_webhook(
         return (StatusCode::TOO_MANY_REQUESTS, Json(err));
     }
 
-    // ── Authentication: Cloudflare Access (replaces pairing) ──
-    if state.pairing.require_pairing() || state.cf_access_enabled {
+    // ── Authentication: Cloudflare Access ──
+    if state.cf_access_enabled {
         let mut authenticated = false;
 
         // Cloudflare Access JWT authentication
-        if state.cf_access_enabled {
-            if let Some(ref public_key) = state.cf_access_public_key {
-                if let Some(jwt) = crate::auth::cloudflare_access::extract_cloudflare_jwt(&headers)
-                {
-                    match crate::auth::cloudflare_access::validate_cloudflare_token(
-                        &jwt, public_key,
-                    ) {
-                        crate::auth::cloudflare_access::CloudflareAuthResult::Authenticated(_) => {
-                            authenticated = true;
-                        }
-                        _ => {}
+        if let Some(ref public_key) = state.cf_access_public_key {
+            if let Some(jwt) = crate::auth::cloudflare_access::extract_cloudflare_jwt(&headers) {
+                match crate::auth::cloudflare_access::validate_cloudflare_token(&jwt, public_key) {
+                    crate::auth::cloudflare_access::CloudflareAuthResult::Authenticated(_) => {
+                        authenticated = true;
                     }
-                }
-                // If cf_access_enabled but no valid JWT, reject
-                if !authenticated {
-                    tracing::warn!("Webhook: rejected — invalid or missing Cloudflare Access JWT");
-                    let err = serde_json::json!({
-                        "error": "Unauthorized — valid Cloudflare Access JWT required"
-                    });
-                    return (StatusCode::UNAUTHORIZED, Json(err));
+                    _ => {}
                 }
             }
-        } else if state.pairing.require_pairing() {
-            // Pairing fallback only if Cloudflare is not enabled
-            let auth = headers
-                .get(header::AUTHORIZATION)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            let token = auth.strip_prefix("Bearer ").unwrap_or("");
-            if !state.pairing.is_authenticated(token) {
-                tracing::warn!("Webhook: rejected — not paired / invalid bearer token");
+            // If cf_access_enabled but no valid JWT, reject
+            if !authenticated {
+                tracing::warn!("Webhook: rejected — invalid or missing Cloudflare Access JWT");
                 let err = serde_json::json!({
-                    "error": "Unauthorized — pair first via POST /pair, then send Authorization: Bearer <token>"
+                    "error": "Unauthorized — valid Cloudflare Access JWT required"
                 });
                 return (StatusCode::UNAUTHORIZED, Json(err));
             }

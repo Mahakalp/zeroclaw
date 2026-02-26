@@ -747,19 +747,9 @@ pub struct GatewayConfig {
     /// Gateway host (default: 127.0.0.1)
     #[serde(default = "default_gateway_host")]
     pub host: String,
-    /// Require pairing before accepting requests (default: true)
-    #[serde(default = "default_true")]
-    pub require_pairing: bool,
     /// Allow binding to non-localhost without a tunnel (default: false)
     #[serde(default)]
     pub allow_public_bind: bool,
-    /// Paired bearer tokens (managed automatically, not user-edited)
-    #[serde(default)]
-    pub paired_tokens: Vec<String>,
-
-    /// Max `/pair` requests per minute per client key.
-    #[serde(default = "default_pair_rate_limit")]
-    pub pair_rate_limit_per_minute: u32,
 
     /// Max `/webhook` requests per minute per client key.
     #[serde(default = "default_webhook_rate_limit")]
@@ -831,10 +821,7 @@ impl Default for GatewayConfig {
         Self {
             port: default_gateway_port(),
             host: default_gateway_host(),
-            require_pairing: true,
             allow_public_bind: false,
-            paired_tokens: Vec::new(),
-            pair_rate_limit_per_minute: default_pair_rate_limit(),
             webhook_rate_limit_per_minute: default_webhook_rate_limit(),
             trust_forwarded_headers: false,
             rate_limit_max_keys: default_gateway_rate_limit_max_keys(),

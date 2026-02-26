@@ -1,7 +1,6 @@
 //! REST API handlers for the web dashboard.
 //!
-//! All `/api/*` routes require bearer token authentication (PairingGuard)
-//! OR Cloudflare Access JWT validation.
+//! All `/api/*` routes require Cloudflare Access JWT validation.
 
 use super::AppState;
 use crate::auth::cloudflare_access::{
@@ -9,68 +8,45 @@ use crate::auth::cloudflare_access::{
 };
 use axum::{
     extract::{Path, Query, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json},
 };
 use serde::Deserialize;
 
-// ── Bearer token auth extractor ─────────────────────────────────
-
-/// Extract and validate bearer token from Authorization header.
-fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|auth| auth.strip_prefix("Bearer "))
-}
-
-/// Verify bearer token against PairingGuard. Returns error response if unauthorized.
+/// Verify request uses Cloudflare Access JWT. Returns error response if unauthorized.
 fn require_auth(
     state: &AppState,
     headers: &HeaderMap,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    // If pairing is not required AND Cloudflare is not enabled, allow all requests
-    if !state.pairing.require_pairing() && !state.cf_access_enabled {
+) -> Result<(), (axum::http::StatusCode, Json<serde_json::Value>)> {
+    // If Cloudflare Access is not enabled, allow all requests
+    if !state.cf_access_enabled {
         return Ok(());
     }
 
-    // Cloudflare Access JWT authentication (replaces pairing entirely)
-    if state.cf_access_enabled {
-        if let Some(ref public_key) = state.cf_access_public_key {
-            if let Some(jwt) = extract_cloudflare_jwt(headers) {
-                match validate_cloudflare_token(&jwt, public_key) {
-                    CloudflareAuthResult::Authenticated(_claims) => {
-                        tracing::debug!("Authenticated via Cloudflare Access JWT");
-                        return Ok(());
-                    }
-                    CloudflareAuthResult::Invalid(e) => {
-                        tracing::warn!("Cloudflare JWT validation failed: {}", e);
-                    }
-                    CloudflareAuthResult::NotPresent => {}
+    // Cloudflare Access JWT authentication required
+    if let Some(ref public_key) = state.cf_access_public_key {
+        if let Some(jwt) = extract_cloudflare_jwt(headers) {
+            match validate_cloudflare_token(&jwt, public_key) {
+                CloudflareAuthResult::Authenticated(_claims) => {
+                    tracing::debug!("Authenticated via Cloudflare Access JWT");
+                    return Ok(());
                 }
+                CloudflareAuthResult::Invalid(e) => {
+                    tracing::warn!("Cloudflare JWT validation failed: {}", e);
+                }
+                CloudflareAuthResult::NotPresent => {}
             }
-            // If cf_access_enabled but no valid JWT, reject
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({
-                    "error": "Unauthorized — valid Cloudflare Access JWT required"
-                })),
-            ));
         }
+        // If cf_access_enabled but no valid JWT, reject
+        return Err((
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "error": "Unauthorized — valid Cloudflare Access JWT required"
+            })),
+        ));
     }
 
-    // Fallback to pairing only if Cloudflare is not enabled
-    let token = extract_bearer_token(headers).unwrap_or("");
-    if state.pairing.is_authenticated(token) {
-        Ok(())
-    } else {
-        Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({
-                "error": "Unauthorized — pair first via POST /pair, then send Authorization: Bearer <token>"
-            })),
-        ))
-    }
+    Ok(())
 }
 
 // ── Query parameters ─────────────────────────────────────────────
@@ -128,7 +104,7 @@ pub async fn handle_api_status(
         "gateway_port": config.gateway.port,
         "locale": "en",
         "memory_backend": state.mem.name(),
-        "paired": state.pairing.is_paired(),
+        "cf_access_enabled": state.cf_access_enabled,
         "channels": channels,
         "health": health,
     });

@@ -5383,10 +5383,10 @@ fn print_summary(config: &Config) {
     println!(
         "    {} Gateway:       {}",
         style("🚪").cyan(),
-        if config.gateway.require_pairing {
-            "pairing required (secure)"
+        if config.gateway.cf_access_enabled {
+            "Cloudflare Access (secure)"
         } else {
-            "pairing disabled"
+            "unauthenticated"
         }
     );
 

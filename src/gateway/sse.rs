@@ -8,7 +8,7 @@ use crate::auth::cloudflare_access::{
 };
 use axum::{
     extract::State,
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse,
@@ -20,33 +20,24 @@ use tokio_stream::StreamExt;
 
 /// Check if request is authenticated via Cloudflare Access
 fn is_authenticated(state: &AppState, headers: &HeaderMap) -> bool {
-    // If neither pairing nor Cloudflare is enabled, allow all
-    if !state.pairing.require_pairing() && !state.cf_access_enabled {
+    // If Cloudflare Access is not enabled, allow all
+    if !state.cf_access_enabled {
         return true;
     }
 
-    // Cloudflare Access JWT authentication (replaces pairing entirely)
-    if state.cf_access_enabled {
-        if let Some(ref public_key) = state.cf_access_public_key {
-            if let Some(jwt) = extract_cloudflare_jwt(headers) {
-                match validate_cloudflare_token(&jwt, public_key) {
-                    CloudflareAuthResult::Authenticated(_) => return true,
-                    _ => {}
-                }
+    // Cloudflare Access JWT authentication required
+    if let Some(ref public_key) = state.cf_access_public_key {
+        if let Some(jwt) = extract_cloudflare_jwt(headers) {
+            match validate_cloudflare_token(&jwt, public_key) {
+                CloudflareAuthResult::Authenticated(_) => return true,
+                _ => {}
             }
-            // If cf_access_enabled but no valid JWT, reject
-            return false;
         }
+        // If cf_access_enabled but no valid JWT, reject
+        return false;
     }
 
-    // Fallback to pairing only if Cloudflare is not enabled
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|auth| auth.strip_prefix("Bearer "))
-        .unwrap_or("");
-
-    state.pairing.is_authenticated(token)
+    true
 }
 
 /// GET /api/events — SSE event stream
@@ -58,7 +49,7 @@ pub async fn handle_sse_events(
     if !is_authenticated(&state, &headers) {
         return (
             StatusCode::UNAUTHORIZED,
-            "Unauthorized — provide Authorization: Bearer <token>",
+            "Unauthorized — valid Cloudflare Access JWT required",
         )
             .into_response();
     }
