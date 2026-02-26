@@ -823,6 +823,40 @@ pub(super) async fn run_gateway_chat_with_tools(
     message: &str,
 ) -> anyhow::Result<String> {
     let mut config = state.config.lock().clone();
+
+    // Prefer active provider from config database when available.
+    // This keeps runtime aligned with Providers page selections.
+    if let Some(db) = &state.config_db {
+        if let Ok(Some(profile)) = db.get_active_profile() {
+            if let Ok(Some(provider)) = db.get_default_provider(&profile.id) {
+                if provider.is_enabled {
+                    config.default_provider = Some(provider.name.clone());
+                    if provider
+                        .default_model
+                        .as_deref()
+                        .is_some_and(|m| !m.trim().is_empty())
+                    {
+                        config.default_model = provider.default_model.clone();
+                    }
+                    if provider
+                        .api_key
+                        .as_deref()
+                        .is_some_and(|k| !k.trim().is_empty())
+                    {
+                        config.api_key = provider.api_key.clone();
+                    }
+                    if provider
+                        .api_url
+                        .as_deref()
+                        .is_some_and(|u| !u.trim().is_empty())
+                    {
+                        config.api_url = provider.api_url.clone();
+                    }
+                }
+            }
+        }
+    }
+
     // Stabilization mode: keep provider selection explicit (no automatic fallback chain).
     config.reliability.fallback_providers.clear();
     crate::agent::process_message(config, message).await

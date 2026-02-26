@@ -133,7 +133,7 @@ export function ProviderSection({ config, onConfigChange }: ProviderSectionProps
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-white">Provider Settings</h3>
+        <h3 className="text-lg font-semibold text-white">Runtime Default Provider</h3>
         <button
           onClick={handleSave}
           className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
@@ -144,6 +144,10 @@ export function ProviderSection({ config, onConfigChange }: ProviderSectionProps
       </div>
 
       <div className="grid gap-4">
+        <div className="text-xs text-amber-300 bg-amber-900/20 border border-amber-700/40 rounded-md px-3 py-2">
+          This sets the daemon's active runtime provider/model. It is separate from the
+          Providers catalog and used by Agent Chat when no profile default is selected.
+        </div>
         <FormField label="Provider">
           <FormSelect
             value={provider}

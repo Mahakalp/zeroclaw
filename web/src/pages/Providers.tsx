@@ -162,15 +162,33 @@ export default function Providers() {
     setError(null);
 
     try {
-      const metadataJson = JSON.stringify(values, null, 2);
+      const getString = (key: string): string | undefined => {
+        const raw = values[key];
+        if (typeof raw !== 'string') return undefined;
+        const trimmed = raw.trim();
+        return trimmed.length > 0 ? trimmed : undefined;
+      };
+
+      const apiKey = getString('api_key');
+      const apiUrl = getString('api_url');
+      const formDefaultModel = getString('default_model');
+      const resolvedDefaultModel = defaultModel.trim() || formDefaultModel;
+
+      const metadata = { ...values };
+      delete metadata.api_key;
+      delete metadata.api_url;
+      delete metadata.default_model;
+
       const providerData = {
         profile_id: 'default',
         name: providerType.trim(),
-        default_model: defaultModel.trim() || undefined,
+        api_key: apiKey,
+        api_url: apiUrl,
+        default_model: resolvedDefaultModel || undefined,
         is_default: isDefault,
         is_enabled: isEnabled,
         priority: 0,
-        metadata: metadataJson,
+        metadata: JSON.stringify(metadata, null, 2),
       };
 
       if (editingId) {
@@ -198,9 +216,18 @@ export default function Providers() {
 
     try {
       const parsed = JSON.parse(provider.metadata || '{}');
-      setFormValues(parsed);
+      setFormValues({
+        ...parsed,
+        api_key: provider.api_key || '',
+        api_url: provider.api_url || '',
+        default_model: provider.default_model || '',
+      });
     } catch {
-      setFormValues({});
+      setFormValues({
+        api_key: provider.api_key || '',
+        api_url: provider.api_url || '',
+        default_model: provider.default_model || '',
+      });
     }
 
     fetchSchema(provider.name);

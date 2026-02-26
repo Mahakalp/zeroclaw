@@ -173,8 +173,6 @@ export function SchemaForm({
         type={inputType}
         placeholder={field.example}
         disabled={disabled}
-        error={error}
-        hint={field.hint}
       />
     );
   };
