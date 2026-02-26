@@ -98,6 +98,12 @@ pub struct ChannelToggleBody {
 pub async fn handle_api_public_status(State(state): State<AppState>) -> impl IntoResponse {
     let config = state.config.lock().clone();
     let health = crate::health::snapshot();
+    let health_json = serde_json::json!({
+        "status": "ok",
+        "updated_at": health.updated_at,
+        "uptime_seconds": health.uptime_seconds,
+        "components": health.components,
+    });
 
     let body = serde_json::json!({
         "status": "ok",
@@ -106,7 +112,7 @@ pub async fn handle_api_public_status(State(state): State<AppState>) -> impl Int
         "uptime_seconds": health.uptime_seconds,
         "gateway_port": config.gateway.port,
         "cf_access_enabled": state.cf_access_enabled,
-        "health": health,
+        "health": health_json,
     });
 
     Json(body)
@@ -130,7 +136,16 @@ pub async fn handle_api_status(
         channels.insert(channel.name().to_string(), serde_json::Value::Bool(present));
     }
 
+    let health = crate::health::snapshot();
+    let health_json = serde_json::json!({
+        "status": "ok",
+        "updated_at": health.updated_at,
+        "uptime_seconds": health.uptime_seconds,
+        "components": health.components,
+    });
+
     let body = serde_json::json!({
+        "status": "ok",
         "provider": config.default_provider,
         "model": state.model,
         "temperature": state.temperature,
@@ -140,7 +155,7 @@ pub async fn handle_api_status(
         "memory_backend": state.mem.name(),
         "cf_access_enabled": state.cf_access_enabled,
         "channels": channels,
-        "health": health,
+        "health": health_json,
     });
 
     Json(body).into_response()
