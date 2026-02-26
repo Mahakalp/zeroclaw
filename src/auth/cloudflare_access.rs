@@ -98,6 +98,7 @@ pub fn validate_cloudflare_token(
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         if exp < now {
+            tracing::warn!("Token expired: exp={}, now={}", exp, now);
             return CloudflareAuthResult::Invalid("Token expired".to_string());
         }
     }
@@ -118,6 +119,7 @@ pub fn validate_cloudflare_token(
 
     // Validate issuer
     if let Some(iss) = &claims.iss {
+        tracing::debug!("JWT issuer: {}", iss);
         if !iss.ends_with(".cloudflareaccess.com") && !iss.contains(".cloudflareaccess.com") {
             return CloudflareAuthResult::Invalid(format!("Invalid issuer: {}", iss));
         }
@@ -132,9 +134,13 @@ pub fn validate_cloudflare_token(
         }
     };
 
+    tracing::debug!("Verifying signature with public key...");
     if let Err(e) = verify_rsa_sha256(public_key, signature_input.as_bytes(), &signature) {
+        tracing::warn!("Signature verification failed: {}", e);
         return CloudflareAuthResult::Invalid(format!("Signature verification failed: {}", e));
     }
+
+    tracing::debug!("JWT validation successful!");
 
     CloudflareAuthResult::Authenticated(claims)
 }
@@ -200,8 +206,43 @@ pub fn extract_cloudflare_jwt(headers: &axum::http::HeaderMap) -> Option<String>
             .as_str()
             .eq_ignore_ascii_case("cf-access-jwt-assertion")
         {
+            tracing::debug!("Found Cf-Access-Jwt-Assertion header");
             return value.to_str().ok().map(|s| s.to_string());
         }
+    }
+
+    // 2. Check CF_Access_JWT cookie (standard Cloudflare Access cookie)
+    if let Some(cookie) = headers.get(axum::http::header::COOKIE) {
+        if let Ok(cookie_str) = cookie.to_str() {
+            for part in cookie_str.split(';') {
+                let part = part.trim();
+                if part.starts_with("CF_Access_JWT=") || part.starts_with("CF_Authorization=") {
+                    let key = if part.starts_with("CF_Access_JWT=") {
+                        "CF_Access_JWT="
+                    } else {
+                        "CF_Authorization="
+                    };
+                    tracing::debug!("Found {} cookie", key.trim_end_matches('='));
+                    return Some(part.strip_prefix(key)?.to_string());
+                }
+            }
+        }
+    }
+
+    // 3. Check CF-Access-Client-Token header (service tokens)
+    for (name, value) in headers.iter() {
+        if name
+            .as_str()
+            .eq_ignore_ascii_case("cf-access-client-token")
+        {
+            tracing::debug!("Found CF-Access-Client-Token header");
+            return value.to_str().ok().map(|s| s.to_string());
+        }
+    }
+
+    tracing::debug!("No Cloudflare Access JWT found in headers");
+    None
+}
     }
 
     // 2. Check CF_Access_JWT cookie (standard Cloudflare Access cookie)
