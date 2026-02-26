@@ -234,9 +234,15 @@ struct CloudflareJwkKey {
 }
 
 #[derive(Clone)]
+struct JwkRsaKey {
+    n: Vec<u8>,
+    e: Vec<u8>,
+}
+
+#[derive(Clone)]
 struct JwksCacheEntry {
     fetched_at: Instant,
-    keys: HashMap<String, Vec<u8>>, // kid -> SPKI DER
+    keys: HashMap<String, JwkRsaKey>,
 }
 
 static CLOUDFLARE_JWKS_CACHE: OnceLock<Mutex<HashMap<String, JwksCacheEntry>>> = OnceLock::new();
@@ -248,7 +254,7 @@ fn verify_against_cloudflare_jwks(
     message: &[u8],
     signature: &[u8],
 ) -> Result<(), String> {
-    use ring::signature::{UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
+    use ring::signature::{RsaPublicKeyComponents, RSA_PKCS1_2048_8192_SHA256};
 
     let keys = cloudflare_jwks_keys_for_issuer(iss)?;
     if keys.is_empty() {
@@ -257,16 +263,25 @@ fn verify_against_cloudflare_jwks(
 
     if let Some(target_kid) = kid {
         if let Some(key) = keys.get(target_kid) {
-            let verifier = UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, key);
-            return verifier
-                .verify(message, signature)
+            let components = RsaPublicKeyComponents {
+                n: key.n.as_slice(),
+                e: key.e.as_slice(),
+            };
+            return components
+                .verify(&RSA_PKCS1_2048_8192_SHA256, message, signature)
                 .map_err(|e| format!("kid {} verify error: {}", target_kid, e));
         }
     }
 
     for (candidate_kid, key) in &keys {
-        let verifier = UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, key);
-        if verifier.verify(message, signature).is_ok() {
+        let components = RsaPublicKeyComponents {
+            n: key.n.as_slice(),
+            e: key.e.as_slice(),
+        };
+        if components
+            .verify(&RSA_PKCS1_2048_8192_SHA256, message, signature)
+            .is_ok()
+        {
             tracing::debug!("JWT signature verified with JWKS kid={}", candidate_kid);
             return Ok(());
         }
@@ -275,7 +290,7 @@ fn verify_against_cloudflare_jwks(
     Err("No matching JWKS key could verify signature".to_string())
 }
 
-fn cloudflare_jwks_keys_for_issuer(iss: &str) -> Result<HashMap<String, Vec<u8>>, String> {
+fn cloudflare_jwks_keys_for_issuer(iss: &str) -> Result<HashMap<String, JwkRsaKey>, String> {
     let cache = CLOUDFLARE_JWKS_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let now = Instant::now();
 
@@ -305,7 +320,7 @@ fn cloudflare_jwks_keys_for_issuer(iss: &str) -> Result<HashMap<String, Vec<u8>>
     Ok(keys)
 }
 
-fn fetch_cloudflare_jwks_keys(iss: &str) -> Result<HashMap<String, Vec<u8>>, String> {
+fn fetch_cloudflare_jwks_keys(iss: &str) -> Result<HashMap<String, JwkRsaKey>, String> {
     let jwks_url = format!("{}/cdn-cgi/access/certs", iss.trim_end_matches('/'));
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -325,99 +340,11 @@ fn fetch_cloudflare_jwks_keys(iss: &str) -> Result<HashMap<String, Vec<u8>>, Str
         if k.kty != "RSA" {
             continue;
         }
-        let spki = jwk_rsa_to_spki_der(&k.n, &k.e)?;
-        keys.insert(k.kid, spki);
+        let n = decode_base64_url(&k.n)?;
+        let e = decode_base64_url(&k.e)?;
+        keys.insert(k.kid, JwkRsaKey { n, e });
     }
     Ok(keys)
-}
-
-fn jwk_rsa_to_spki_der(n_b64url: &str, e_b64url: &str) -> Result<Vec<u8>, String> {
-    let n = decode_base64_url(n_b64url)?;
-    let e = decode_base64_url(e_b64url)?;
-
-    let rsa_pubkey = der_sequence([der_integer(&n), der_integer(&e)].concat());
-
-    // rsaEncryption OID + NULL params
-    let alg_id = der_sequence([der_oid(&[1, 2, 840, 113549, 1, 1, 1]), der_null()].concat());
-
-    let subject_public_key = der_bit_string(&rsa_pubkey);
-
-    Ok(der_sequence([alg_id, subject_public_key].concat()))
-}
-
-fn der_len(len: usize) -> Vec<u8> {
-    if len < 128 {
-        return vec![len as u8];
-    }
-
-    let mut bytes = Vec::new();
-    let mut n = len;
-    while n > 0 {
-        bytes.push((n & 0xff) as u8);
-        n >>= 8;
-    }
-    bytes.reverse();
-
-    let mut out = vec![0x80 | (bytes.len() as u8)];
-    out.extend(bytes);
-    out
-}
-
-fn der_tlv(tag: u8, value: &[u8]) -> Vec<u8> {
-    let mut out = vec![tag];
-    out.extend(der_len(value.len()));
-    out.extend(value);
-    out
-}
-
-fn der_sequence(value: Vec<u8>) -> Vec<u8> {
-    der_tlv(0x30, &value)
-}
-
-fn der_integer(raw: &[u8]) -> Vec<u8> {
-    let mut value = raw.to_vec();
-    while value.len() > 1 && value[0] == 0 {
-        value.remove(0);
-    }
-    if value.first().map(|b| b & 0x80 != 0).unwrap_or(false) {
-        let mut prefixed = vec![0x00];
-        prefixed.extend(value);
-        return der_tlv(0x02, &prefixed);
-    }
-    der_tlv(0x02, &value)
-}
-
-fn der_bit_string(raw: &[u8]) -> Vec<u8> {
-    let mut v = Vec::with_capacity(raw.len() + 1);
-    v.push(0x00); // 0 unused bits
-    v.extend(raw);
-    der_tlv(0x03, &v)
-}
-
-fn der_null() -> Vec<u8> {
-    der_tlv(0x05, &[])
-}
-
-fn der_oid(components: &[u64]) -> Vec<u8> {
-    if components.len() < 2 {
-        return der_tlv(0x06, &[]);
-    }
-
-    let mut bytes = Vec::new();
-    bytes.push((components[0] * 40 + components[1]) as u8);
-    for &c in &components[2..] {
-        let mut stack = Vec::new();
-        let mut value = c;
-        stack.push((value & 0x7f) as u8);
-        value >>= 7;
-        while value > 0 {
-            stack.push(((value & 0x7f) as u8) | 0x80);
-            value >>= 7;
-        }
-        stack.reverse();
-        bytes.extend(stack);
-    }
-    der_tlv(0x06, &bytes)
 }
 
 fn parse_rsa_public_key(pem: &str) -> Result<Vec<u8>, String> {
