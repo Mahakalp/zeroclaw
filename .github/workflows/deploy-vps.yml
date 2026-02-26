@@ -84,8 +84,10 @@ jobs:
             echo "=== Pulling custom image: $IMAGE ==="
             docker pull $IMAGE || exit 1
             
-            echo "=== Remove old config to use container's default (with CF auth) ==="
-            rm -f ~/.zeroclaw/config.toml
+            echo "=== Extract config from image (with CF auth) ==="
+            docker create --name zeroclaw-temp $IMAGE /bin/true
+            docker cp zeroclaw-temp:/zeroclaw-data/config.toml ~/.zeroclaw/config.toml
+            docker rm zeroclaw-temp
             
             echo "=== Stopping existing container ==="
             docker stop zeroclaw 2>/dev/null || true
