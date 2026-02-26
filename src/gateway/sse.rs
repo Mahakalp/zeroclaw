@@ -18,14 +18,14 @@ use std::convert::Infallible;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
-/// Check if request is authenticated via Cloudflare Access or bearer token
+/// Check if request is authenticated via Cloudflare Access
 fn is_authenticated(state: &AppState, headers: &HeaderMap) -> bool {
-    // If pairing not required, allow all
-    if !state.pairing.require_pairing() {
+    // If neither pairing nor Cloudflare is enabled, allow all
+    if !state.pairing.require_pairing() && !state.cf_access_enabled {
         return true;
     }
 
-    // Check Cloudflare Access JWT first (if enabled)
+    // Cloudflare Access JWT authentication (replaces pairing entirely)
     if state.cf_access_enabled {
         if let Some(ref public_key) = state.cf_access_public_key {
             if let Some(jwt) = extract_cloudflare_jwt(headers) {
@@ -34,10 +34,12 @@ fn is_authenticated(state: &AppState, headers: &HeaderMap) -> bool {
                     _ => {}
                 }
             }
+            // If cf_access_enabled but no valid JWT, reject
+            return false;
         }
     }
 
-    // Fall back to bearer token / pairing
+    // Fallback to pairing only if Cloudflare is not enabled
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())

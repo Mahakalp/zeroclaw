@@ -29,12 +29,12 @@ fn require_auth(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    // If pairing is not required, allow all requests
-    if !state.pairing.require_pairing() {
+    // If pairing is not required AND Cloudflare is not enabled, allow all requests
+    if !state.pairing.require_pairing() && !state.cf_access_enabled {
         return Ok(());
     }
 
-    // Check for Cloudflare Access JWT first (if enabled)
+    // Cloudflare Access JWT authentication (replaces pairing entirely)
     if state.cf_access_enabled {
         if let Some(ref public_key) = state.cf_access_public_key {
             if let Some(jwt) = extract_cloudflare_jwt(headers) {
@@ -49,10 +49,17 @@ fn require_auth(
                     CloudflareAuthResult::NotPresent => {}
                 }
             }
+            // If cf_access_enabled but no valid JWT, reject
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "Unauthorized — valid Cloudflare Access JWT required"
+                })),
+            ));
         }
     }
 
-    // Fall back to bearer token / pairing
+    // Fallback to pairing only if Cloudflare is not enabled
     let token = extract_bearer_token(headers).unwrap_or("");
     if state.pairing.is_authenticated(token) {
         Ok(())

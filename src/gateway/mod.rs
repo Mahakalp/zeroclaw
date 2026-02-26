@@ -941,10 +941,11 @@ async fn handle_webhook(
         return (StatusCode::TOO_MANY_REQUESTS, Json(err));
     }
 
-    // ── Bearer token auth (pairing) or Cloudflare Access ──
-    if state.pairing.require_pairing() {
-        // Check Cloudflare Access JWT first (if enabled)
+    // ── Authentication: Cloudflare Access (replaces pairing) ──
+    if state.pairing.require_pairing() || state.cf_access_enabled {
         let mut authenticated = false;
+
+        // Cloudflare Access JWT authentication
         if state.cf_access_enabled {
             if let Some(ref public_key) = state.cf_access_public_key {
                 if let Some(jwt) = crate::auth::cloudflare_access::extract_cloudflare_jwt(&headers)
@@ -958,11 +959,17 @@ async fn handle_webhook(
                         _ => {}
                     }
                 }
+                // If cf_access_enabled but no valid JWT, reject
+                if !authenticated {
+                    tracing::warn!("Webhook: rejected — invalid or missing Cloudflare Access JWT");
+                    let err = serde_json::json!({
+                        "error": "Unauthorized — valid Cloudflare Access JWT required"
+                    });
+                    return (StatusCode::UNAUTHORIZED, Json(err));
+                }
             }
-        }
-
-        // Fall back to bearer token / pairing
-        if !authenticated {
+        } else if state.pairing.require_pairing() {
+            // Pairing fallback only if Cloudflare is not enabled
             let auth = headers
                 .get(header::AUTHORIZATION)
                 .and_then(|v| v.to_str().ok())

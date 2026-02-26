@@ -29,14 +29,14 @@ pub struct WsQuery {
     pub token: Option<String>,
 }
 
-/// Check if request is authenticated via Cloudflare Access or pairing token
+/// Check if request is authenticated via Cloudflare Access
 fn is_authenticated(state: &AppState, headers: &HeaderMap, query_token: Option<&str>) -> bool {
-    // If pairing not required, allow all
-    if !state.pairing.require_pairing() {
+    // If neither pairing nor Cloudflare is enabled, allow all
+    if !state.pairing.require_pairing() && !state.cf_access_enabled {
         return true;
     }
 
-    // Check Cloudflare Access JWT first (if enabled)
+    // Cloudflare Access JWT authentication (replaces pairing entirely)
     if state.cf_access_enabled {
         if let Some(ref public_key) = state.cf_access_public_key {
             if let Some(jwt) = extract_cloudflare_jwt(headers) {
@@ -45,10 +45,12 @@ fn is_authenticated(state: &AppState, headers: &HeaderMap, query_token: Option<&
                     _ => {}
                 }
             }
+            // If cf_access_enabled but no valid JWT, reject
+            return false;
         }
     }
 
-    // Fall back to bearer token / pairing
+    // Fallback to pairing only if Cloudflare is not enabled
     let token = query_token.unwrap_or("");
     state.pairing.is_authenticated(token)
 }
