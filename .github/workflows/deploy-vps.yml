@@ -94,9 +94,8 @@ jobs:
               --network caddy-net \
               --restart unless-stopped \
               -p 42617:42617 \
-              -v ~/.zeroclaw:/zeroclaw-data/.zeroclaw \
-              -v zeroclaw-data:/zeroclaw-data/workspace \
-              -e ZEROCLAW_CONFIG_DIR=/zeroclaw-data/.zeroclaw \
+              -v ~/.zeroclaw:/zeroclaw-data \
+              -e ZEROCLAW_CONFIG_DIR=/zeroclaw-data \
               -e ZEROCLAW_WORKSPACE=/zeroclaw-data/workspace \
               -e ZEROCLAW_ALLOW_PUBLIC_BIND=true \
               -e ZEROCLAW_GATEWAY_HOST="[::]" \
