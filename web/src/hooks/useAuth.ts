@@ -3,32 +3,18 @@ import {
   useContext,
   useState,
   useCallback,
-  useEffect,
   type ReactNode,
 } from 'react';
 import React from 'react';
-import {
-  getToken as readToken,
-  getToken,
-  setToken as writeToken,
-  clearToken as removeToken,
-  isAuthenticated as checkAuth,
-} from '../lib/auth';
-import { pair as apiPair } from '../lib/api';
-import type { HealthResponse } from '../types/api';
 
 // ---------------------------------------------------------------------------
 // Context shape
 // ---------------------------------------------------------------------------
 
 export interface AuthState {
-  /** The current bearer token, or null if not authenticated. */
-  token: string | null;
-  /** Whether the user is currently authenticated. */
+  /** Always true when using Cloudflare Access - browser handles auth */
   isAuthenticated: boolean;
-  /** Pair with the agent using a pairing code. Stores the token on success. */
-  pair: (code: string) => Promise<void>;
-  /** Clear the stored token and sign out. */
+  /** No-op for Cloudflare Access */
   logout: () => void;
 }
 
@@ -43,60 +29,15 @@ export interface AuthProviderProps {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [token, setTokenState] = useState<string | null>(readToken);
-  const [authenticated, setAuthenticated] = useState<boolean>(checkAuth);
-
-  useEffect(() => {
-    async function checkPairingRequirement() {
-      try {
-        const response = await fetch('/health');
-        if (response.ok) {
-          const data = (await response.json()) as HealthResponse;
-          if (!data.require_pairing) {
-            setAuthenticated(true);
-          } else {
-            const existingToken = getToken();
-            setAuthenticated(existingToken !== null && existingToken.length > 0);
-          }
-        }
-      } catch {
-        const existingToken = getToken();
-        setAuthenticated(existingToken !== null && existingToken.length > 0);
-      }
-    }
-    checkPairingRequirement();
-  }, []);
-
-  // Keep state in sync if localStorage is changed in another tab
-  useEffect(() => {
-    const handler = (e: StorageEvent) => {
-      if (e.key === 'zeroclaw_token') {
-        const t = readToken();
-        setTokenState(t);
-        setAuthenticated(t !== null && t.length > 0);
-      }
-    };
-    window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
-  }, []);
-
-  const pair = useCallback(async (code: string): Promise<void> => {
-    const { token: newToken } = await apiPair(code);
-    writeToken(newToken);
-    setTokenState(newToken);
-    setAuthenticated(true);
-  }, []);
+  // With Cloudflare Access, user is authenticated via browser
+  const [authenticated] = useState<boolean>(true);
 
   const logout = useCallback((): void => {
-    removeToken();
-    setTokenState(null);
-    setAuthenticated(false);
+    // Cloudflare Access handles logout via browser - no local token to clear
   }, []);
 
   const value: AuthState = {
-    token,
     isAuthenticated: authenticated,
-    pair,
     logout,
   };
 

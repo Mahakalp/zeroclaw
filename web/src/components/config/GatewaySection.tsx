@@ -12,7 +12,8 @@ interface GatewaySectionProps {
 export function GatewaySection({ config, onConfigChange }: GatewaySectionProps) {
   const [port, setPort] = useState('');
   const [host, setHost] = useState('');
-  const [requirePairing, setRequirePairing] = useState(true);
+  const [cfAccessEnabled, setCfAccessEnabled] = useState(false);
+  const [cfAccessPublicKey, setCfAccessPublicKey] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -24,7 +25,8 @@ export function GatewaySection({ config, onConfigChange }: GatewaySectionProps) 
     const lines = toml.split('\n');
     let currentPort = '';
     let currentHost = '';
-    let currentRequirePairing = true;
+    let currentCfAccessEnabled = false;
+    let currentCfAccessPublicKey = '';
 
     for (const line of lines) {
       const trimmed = line.trim();
@@ -37,15 +39,19 @@ export function GatewaySection({ config, onConfigChange }: GatewaySectionProps) 
       } else if (trimmed.startsWith('host')) {
         const match = trimmed.match(/host\s*=\s*"([^"]*)"/);
         if (match) currentHost = match[1] ?? '';
-      } else if (trimmed.startsWith('require_pairing')) {
-        const match = trimmed.match(/require_pairing\s*=\s*(true|false)/);
-        if (match) currentRequirePairing = match[1] === 'true';
+      } else if (trimmed.startsWith('cf_access_enabled')) {
+        const match = trimmed.match(/cf_access_enabled\s*=\s*(true|false)/);
+        if (match) currentCfAccessEnabled = match[1] === 'true';
+      } else if (trimmed.startsWith('cf_access_public_key')) {
+        const match = trimmed.match(/cf_access_public_key\s*=\s*"([^"]*)"/);
+        if (match) currentCfAccessPublicKey = match[1] ?? '';
       }
     }
 
     setPort(currentPort);
     setHost(currentHost);
-    setRequirePairing(currentRequirePairing);
+    setCfAccessEnabled(currentCfAccessEnabled);
+    setCfAccessPublicKey(currentCfAccessPublicKey);
   }
 
   function updateConfig() {
@@ -53,7 +59,8 @@ export function GatewaySection({ config, onConfigChange }: GatewaySectionProps) 
     const newLines: string[] = [];
     let portSet = false;
     let hostSet = false;
-    let requirePairingSet = false;
+    let cfAccessEnabledSet = false;
+    let cfAccessPublicKeySet = false;
     let gatewaySectionFound = false;
 
     for (const line of lines) {
@@ -69,9 +76,13 @@ export function GatewaySection({ config, onConfigChange }: GatewaySectionProps) 
         newLines.push(`host = "${host || '127.0.0.1'}"`);
         hostSet = true;
         gatewaySectionFound = false;
-      } else if (gatewaySectionFound && trimmed.startsWith('require_pairing')) {
-        newLines.push(`require_pairing = ${requirePairing}`);
-        requirePairingSet = true;
+      } else if (gatewaySectionFound && trimmed.startsWith('cf_access_enabled')) {
+        newLines.push(`cf_access_enabled = ${cfAccessEnabled}`);
+        cfAccessEnabledSet = true;
+        gatewaySectionFound = false;
+      } else if (gatewaySectionFound && trimmed.startsWith('cf_access_public_key')) {
+        newLines.push(`cf_access_public_key = "${cfAccessPublicKey}"`);
+        cfAccessPublicKeySet = true;
         gatewaySectionFound = false;
       } else {
         newLines.push(line);
@@ -93,10 +104,16 @@ export function GatewaySection({ config, onConfigChange }: GatewaySectionProps) 
         newLines.splice(gatewayIdx + 1, 0, `host = "${host || '127.0.0.1'}"`);
       }
     }
-    if (!requirePairingSet) {
+    if (!cfAccessEnabledSet) {
       const gatewayIdx = newLines.findIndex(l => l.trim() === '[gateway]');
       if (gatewayIdx !== -1) {
-        newLines.splice(gatewayIdx + 1, 0, `require_pairing = ${requirePairing}`);
+        newLines.splice(gatewayIdx + 1, 0, `cf_access_enabled = ${cfAccessEnabled}`);
+      }
+    }
+    if (!cfAccessPublicKeySet) {
+      const gatewayIdx = newLines.findIndex(l => l.trim() === '[gateway]');
+      if (gatewayIdx !== -1) {
+        newLines.splice(gatewayIdx + 1, 0, `cf_access_public_key = "${cfAccessPublicKey}"`);
       }
     }
 
@@ -151,12 +168,12 @@ export function GatewaySection({ config, onConfigChange }: GatewaySectionProps) 
           />
         </FormField>
 
-        <FormField label="Require Pairing">
+        <FormField label="Cloudflare Access">
           <FormToggle
-            checked={requirePairing}
-            onChange={setRequirePairing}
-            label="Enable Pairing"
-            description="Require pairing before accepting webhook requests"
+            checked={cfAccessEnabled}
+            onChange={setCfAccessEnabled}
+            label="Enable Cloudflare Access"
+            description="Require Cloudflare Access JWT authentication"
           />
         </FormField>
       </div>

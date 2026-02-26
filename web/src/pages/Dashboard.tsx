@@ -140,7 +140,7 @@ export default function Dashboard() {
             {status.memory_backend}
           </p>
           <p className="text-sm text-gray-400">
-            Paired: {status.paired ? 'Yes' : 'No'}
+            Cloudflare Access: {status.cf_access_enabled ? 'Enabled' : 'Disabled'}
           </p>
         </div>
       </div>

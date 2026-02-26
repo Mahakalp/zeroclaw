@@ -748,7 +748,6 @@ async fn handle_health(State(state): State<AppState>) -> impl IntoResponse {
     let body = serde_json::json!({
         "status": "ok",
         "cf_access_enabled": state.cf_access_enabled,
-        "require_pairing": false, // Deprecated: pairing disabled, cf_access used instead
         "runtime": crate::health::snapshot_json(),
     });
     Json(body)

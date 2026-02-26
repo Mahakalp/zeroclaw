@@ -6,15 +6,14 @@ export interface StatusResponse {
   gateway_port: number;
   locale: string;
   memory_backend: string;
-  paired: boolean;
+  cf_access_enabled: boolean;
   channels: Record<string, boolean>;
   health: HealthSnapshot;
 }
 
 export interface HealthResponse {
   status: string;
-  paired: boolean;
-  require_pairing: boolean;
+  cf_access_enabled: boolean;
   runtime: HealthSnapshot;
 }
 
