@@ -644,7 +644,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         // ── Public routes (no auth required) ──
         .route("/health", get(handle_health))
         .route("/api/public/status", get(api::handle_api_public_status))
-        .route("/api/status", get(api::handle_api_public_status))
+        .route("/api/status", get(api::handle_api_status))
         // ── Existing routes ──
         .route("/metrics", get(handle_metrics))
         .route("/webhook", post(handle_webhook))

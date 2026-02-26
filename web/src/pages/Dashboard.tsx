@@ -60,10 +60,19 @@ export default function Dashboard() {
   useEffect(() => {
     Promise.all([getStatus(), getCost()])
       .then(([s, c]) => {
+        if (!s || typeof s !== 'object') {
+          console.error('Dashboard: invalid /api/status payload', s);
+        }
+        if (!c || typeof c !== 'object') {
+          console.error('Dashboard: invalid /api/cost payload', c);
+        }
         setStatus(s);
         setCost(c);
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => {
+        console.error('Dashboard: failed to load data', err);
+        setError(err.message);
+      });
   }, []);
 
   if (error) {
@@ -82,6 +91,13 @@ export default function Dashboard() {
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent" />
       </div>
     );
+  }
+
+  const channels = status.channels ?? {};
+  const components = status.health?.components ?? {};
+
+  if (!status.channels || !status.health?.components) {
+    console.error('Dashboard: status response missing expected fields', status);
   }
 
   const maxCost = Math.max(cost.session_cost_usd, cost.daily_cost_usd, cost.monthly_cost_usd, 0.001);
@@ -126,7 +142,7 @@ export default function Dashboard() {
           <p className="text-lg font-semibold text-white">
             :{status.gateway_port}
           </p>
-          <p className="text-sm text-gray-400">Locale: {status.locale}</p>
+          <p className="text-sm text-gray-400">Locale: {status.locale ?? "en"}</p>
         </div>
 
         <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
@@ -137,7 +153,7 @@ export default function Dashboard() {
             <span className="text-sm text-gray-400">Memory Backend</span>
           </div>
           <p className="text-lg font-semibold text-white capitalize">
-            {status.memory_backend}
+            {status.memory_backend ?? "unknown"}
           </p>
           <p className="text-sm text-gray-400">
             Cloudflare Access: {status.cf_access_enabled ? 'Enabled' : 'Disabled'}
@@ -189,10 +205,10 @@ export default function Dashboard() {
             <h2 className="text-base font-semibold text-white">Active Channels</h2>
           </div>
           <div className="space-y-2">
-            {Object.entries(status.channels).length === 0 ? (
+            {Object.entries(channels).length === 0 ? (
               <p className="text-sm text-gray-500">No channels configured</p>
             ) : (
-              Object.entries(status.channels).map(([name, active]) => (
+              Object.entries(channels).map(([name, active]) => (
                 <div
                   key={name}
                   className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-800/50"
@@ -221,10 +237,10 @@ export default function Dashboard() {
             <h2 className="text-base font-semibold text-white">Component Health</h2>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            {Object.entries(status.health.components).length === 0 ? (
+            {Object.entries(components).length === 0 ? (
               <p className="text-sm text-gray-500 col-span-2">No components reporting</p>
             ) : (
-              Object.entries(status.health.components).map(([name, comp]) => (
+              Object.entries(components).map(([name, comp]) => (
                 <div
                   key={name}
                   className={`rounded-lg p-3 border ${healthBorder(comp.status)} bg-gray-800/50`}
