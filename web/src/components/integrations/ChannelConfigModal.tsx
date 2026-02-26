@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Settings, Loader2 } from 'lucide-react';
 import { FormInput } from '@/components/ui/FormInput';
-import { getConfig, putConfig } from '@/lib/api';
+import { getConfig, getProviderModels, putConfig } from '@/lib/api';
 
 interface ChannelConfigModalProps {
   channel: {
@@ -289,6 +289,7 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [configToml, setConfigToml] = useState<string>('');
   const [values, setValues] = useState<Record<string, string>>({});
   
@@ -312,12 +313,17 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
   const handleSave = async () => {
     setSaving(true);
     setError(null);
+    setMessage(null);
     
     try {
       const allowedFieldKeys = new Set(fields.map((f) => fieldNameToKey(f.label)));
-      const sanitizedValues = Object.fromEntries(
+      const sanitizedValues: Record<string, string> = Object.fromEntries(
         Object.entries(values).filter(([k, v]) => allowedFieldKeys.has(k) && v !== '***MASKED***')
       );
+
+      if (isProviderKey(channelKey)) {
+        sanitizedValues.default_provider = channelKey;
+      }
 
       const newConfig = generateChannelConfig(channelKey, sanitizedValues, configToml);
       await putConfig(newConfig);
@@ -337,9 +343,20 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
   
   const handleTest = async () => {
     setTesting(true);
+    setError(null);
+    setMessage(null);
     try {
-      await getConfig();
-      await new Promise(resolve => setTimeout(resolve, 500));
+      if (isProviderKey(channelKey)) {
+        const models = await getProviderModels(channelKey);
+        setMessage(
+          models.length > 0
+            ? `Connection looks good. Found ${models.length} model(s).`
+            : 'Connection succeeded, but no models were returned for this provider.'
+        );
+      } else {
+        await getConfig();
+        setMessage('Configuration endpoint is reachable.');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Connection test failed');
     } finally {
@@ -386,6 +403,12 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
         {error && (
           <div className="mb-4 rounded-lg bg-red-900/30 border border-red-700 p-3 text-sm text-red-300">
             {error}
+          </div>
+        )}
+
+        {message && !error && (
+          <div className="mb-4 rounded-lg bg-green-900/30 border border-green-700 p-3 text-sm text-green-300">
+            {message}
           </div>
         )}
 

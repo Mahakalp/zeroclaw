@@ -201,9 +201,12 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Gemini 2.5 Pro/Flash",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_model
+                if c.default_provider
                     .as_deref()
-                    .is_some_and(|m| m.starts_with("google/"))
+                    .is_some_and(|p| p == "google" || p == "gemini" || p == "google-gemini")
+                    || c.default_model
+                        .as_deref()
+                        .is_some_and(|m| m.starts_with("google/") || m.starts_with("gemini"))
                 {
                     IntegrationStatus::Active
                 } else {

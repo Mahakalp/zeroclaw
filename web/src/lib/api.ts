@@ -294,6 +294,12 @@ export function getProviders(profileId?: string): Promise<Provider[]> {
   return apiFetch<Provider[]>(`/api/providers${params}`);
 }
 
+export function getProviderModels(provider: string): Promise<string[]> {
+  return apiFetch<{ models: string[] }>(`/api/providers/${encodeURIComponent(provider)}/models`).then(
+    (data) => data.models ?? [],
+  );
+}
+
 export function createProvider(provider: Partial<Provider> & { profile_id: string; name: string }): Promise<Provider> {
   return apiFetch<Provider>('/api/providers', {
     method: 'POST',
