@@ -89,23 +89,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean \
-    && groupadd -r zeroclaw && useradd -r -g zeroclaw zeroclaw
+    && apt-get clean
 
 # Copy binary from builder
 COPY --from=builder /app/zeroclaw /usr/local/bin/zeroclaw
 COPY --chmod=755 --from=builder /app/web /app/web
 COPY --from=builder /zeroclaw-data /zeroclaw-data
-
-# Set ownership for zeroclaw data directory
-RUN chown -R zeroclaw:zeroclaw /zeroclaw-data
-
-USER zeroclaw
-WORKDIR /home/zeroclaw
-
-# Set config directory
-ENV HOME=/home/zeroclaw
-ENV ZEROCLAW_CONFIG_DIR=/zeroclaw-data
 
 WORKDIR /
 

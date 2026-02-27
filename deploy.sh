@@ -189,6 +189,9 @@ eval $DOCKER_CMD
 # Wait for startup
 sleep 3
 
+# Fix config permissions (container runs as root, so we need to fix after)
+chmod 600 ~/.zeroclaw/config.toml 2>/dev/null || true
+
 # Check if running
 if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
     log_info "ZeroClaw is running!"
