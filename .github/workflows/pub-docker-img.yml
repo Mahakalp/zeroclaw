@@ -65,8 +65,6 @@ jobs:
                   tags: zeroclaw-pr-smoke:latest
                   labels: ${{ steps.meta.outputs.labels || '' }}
                   platforms: linux/amd64
-                  cache-from: type=gha
-                  cache-to: type=gha,mode=max
 
             - name: Verify image
               run: docker run --rm zeroclaw-pr-smoke:latest --version
@@ -124,8 +122,6 @@ jobs:
                   push: true
                   tags: ${{ steps.meta.outputs.tags }}
                   platforms: linux/amd64,linux/arm64
-                  cache-from: type=gha
-                  cache-to: type=gha,mode=max
 
             - name: Set GHCR package visibility to public
               shell: bash
