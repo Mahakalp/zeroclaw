@@ -97,14 +97,15 @@ jobs:
               run: |
                   set -euo pipefail
                   IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-                  SHA_TAG="${IMAGE}:sha-${GITHUB_SHA::12}"
+                  IMAGE_LOWER=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+                  SHA_TAG="${IMAGE_LOWER}:sha-${GITHUB_SHA::12}"
                   if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
                     # Push to main branch - tag as latest and main
-                    TAGS="${IMAGE}:latest,${IMAGE}:main,${SHA_TAG}"
+                    TAGS="${IMAGE_LOWER}:latest,${IMAGE_LOWER}:main,${SHA_TAG}"
                   elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
                     # Tag push - use the tag name
                     TAG_NAME="${GITHUB_REF#refs/tags/}"
-                    TAGS="${IMAGE}:${TAG_NAME},${SHA_TAG}"
+                    TAGS="${IMAGE_LOWER}:${TAG_NAME},${SHA_TAG}"
                   elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
                     # Manual trigger - use sha tag
                     TAGS="${SHA_TAG}"

@@ -81,12 +81,13 @@ cf_access_enabled = true
 EOF
 
 # ── Runtime Stage ─────────────────────────────────────────────────
-FROM gcr.io/distroless/cc-debian13
+FROM gcr.io/distroless/debian12
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         curl \
+        ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
