@@ -345,12 +345,9 @@ pub async fn handle_api_config_get(
         }
     };
 
-    // Mask api_key in the TOML output
-    let masked = mask_sensitive_fields(&toml_str);
-
     Json(serde_json::json!({
         "format": "toml",
-        "content": masked,
+        "content": toml_str,
     }))
     .into_response()
 }
@@ -921,35 +918,6 @@ pub async fn handle_api_provider_models_probe(
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
-
-fn mask_sensitive_fields(toml_str: &str) -> String {
-    let mut output = String::with_capacity(toml_str.len());
-    for line in toml_str.lines() {
-        if let Some(eq_pos) = line.find('=') {
-            let key = line[..eq_pos].trim();
-            let should_mask = matches!(
-                key,
-                "api_key"
-                    | "bot_token"
-                    | "access_token"
-                    | "secret"
-                    | "app_secret"
-                    | "signing_secret"
-            );
-
-            if should_mask {
-                output.push_str(&line[..eq_pos + 1]);
-                output.push_str(" \"***MASKED***\"");
-            } else {
-                output.push_str(line);
-            }
-        } else {
-            output.push_str(line);
-        }
-        output.push('\n');
-    }
-    output
-}
 
 async fn fetch_live_models_for_provider(
     provider: &str,

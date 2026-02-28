@@ -19,7 +19,6 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.profiles': 'Profiles',
     'nav.providers': 'Providers',
     'nav.channels': 'Channels',
-    'nav.config': 'Configuration',
     'nav.cost': 'Cost Tracker',
     'nav.logs': 'Logs',
     'nav.doctor': 'Doctor',
@@ -104,15 +103,6 @@ const translations: Record<Locale, Record<string, string>> = {
     'memory.empty': 'No memory entries found.',
     'memory.confirm_delete': 'Are you sure you want to delete this memory entry?',
     'memory.all_categories': 'All Categories',
-
-    // Config
-    'config.title': 'Configuration',
-    'config.save': 'Save',
-    'config.reset': 'Reset',
-    'config.saved': 'Configuration saved successfully.',
-    'config.error': 'Failed to save configuration.',
-    'config.loading': 'Loading configuration...',
-    'config.editor_placeholder': 'TOML configuration...',
 
     // Cost
     'cost.title': 'Cost Tracker',
@@ -287,15 +277,6 @@ const translations: Record<Locale, Record<string, string>> = {
     'memory.empty': 'Hafiza kaydi bulunamadi.',
     'memory.confirm_delete': 'Bu hafiza kaydini silmek istediginizden emin misiniz?',
     'memory.all_categories': 'Tum Kategoriler',
-
-    // Config
-    'config.title': 'Yapilandirma',
-    'config.save': 'Kaydet',
-    'config.reset': 'Sifirla',
-    'config.saved': 'Yapilandirma basariyla kaydedildi.',
-    'config.error': 'Yapilandirma kaydedilemedi.',
-    'config.loading': 'Yapilandirma yukleniyor...',
-    'config.editor_placeholder': 'TOML yapilandirmasi...',
 
     // Cost
     'cost.title': 'Maliyet Takibi',

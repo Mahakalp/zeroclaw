@@ -7,7 +7,6 @@ import Tools from './pages/Tools';
 import Cron from './pages/Cron';
 import Integrations from './pages/Integrations';
 import Memory from './pages/Memory';
-import Config from './pages/Config';
 import Profiles from './pages/Profiles';
 import Providers from './pages/Providers';
 import Channels from './pages/Channels';
@@ -47,7 +46,6 @@ function AppContent() {
           <Route path="/cron" element={<Cron />} />
           <Route path="/integrations" element={<Integrations />} />
           <Route path="/memory" element={<Memory />} />
-          <Route path="/config" element={<Config />} />
           <Route path="/profiles" element={<Profiles />} />
           <Route path="/providers" element={<Providers />} />
           <Route path="/channels" element={<Channels />} />
