@@ -66,7 +66,12 @@ pub use whatsapp::WhatsAppChannel;
 pub use whatsapp_web::WhatsAppWebChannel;
 
 use crate::agent::loop_::{build_tool_instructions, run_tool_call_loop, scrub_credentials};
-use crate::config::Config;
+use crate::config::schema::{
+    DingTalkConfig, DiscordConfig, FeishuConfig, IMessageConfig, IrcConfig, LarkConfig, LinqConfig,
+    MatrixConfig, MattermostConfig, NextcloudTalkConfig, QQConfig, SignalConfig, SlackConfig,
+    TelegramConfig,
+};
+use crate::config::{db::ConfigDatabase, Config};
 use crate::identity;
 use crate::memory::{self, Memory};
 use crate::observability::{self, runtime_trace, Observer};
@@ -85,6 +90,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 use tokio_util::sync::CancellationToken;
+use toml;
 
 /// Per-sender conversation history for channel messages.
 type ConversationHistoryMap = Arc<Mutex<HashMap<String, Vec<ChatMessage>>>>;
@@ -2646,10 +2652,220 @@ struct ConfiguredChannel {
     channel: Arc<dyn Channel>,
 }
 
+fn create_channel_from_db_config(
+    channel_type: &str,
+    config_toml: &str,
+    config: &Config,
+) -> Result<Arc<dyn Channel>> {
+    // Parse TOML config string into the appropriate channel config struct
+    match channel_type {
+        "telegram" => {
+            let tg: TelegramConfig =
+                toml::from_str(config_toml).context("Failed to parse Telegram config")?;
+            Ok(Arc::new(
+                TelegramChannel::new(
+                    tg.bot_token.clone(),
+                    tg.allowed_users.clone(),
+                    tg.mention_only,
+                )
+                .with_streaming(tg.stream_mode, tg.draft_update_interval_ms)
+                .with_transcription(config.transcription.clone())
+                .with_workspace_dir(config.workspace_dir.clone()),
+            ))
+        }
+        "discord" => {
+            let dc: DiscordConfig =
+                toml::from_str(config_toml).context("Failed to parse Discord config")?;
+            Ok(Arc::new(DiscordChannel::new(
+                dc.bot_token.clone(),
+                dc.guild_id.clone(),
+                dc.allowed_users.clone(),
+                dc.listen_to_bots,
+                dc.mention_only,
+            )))
+        }
+        "slack" => {
+            let sl: SlackConfig =
+                toml::from_str(config_toml).context("Failed to parse Slack config")?;
+            Ok(Arc::new(SlackChannel::new(
+                sl.bot_token.clone(),
+                sl.channel_id.clone(),
+                sl.allowed_users.clone(),
+            )))
+        }
+        "mattermost" => {
+            let mm: MattermostConfig =
+                toml::from_str(config_toml).context("Failed to parse Mattermost config")?;
+            Ok(Arc::new(MattermostChannel::new(
+                mm.url.clone(),
+                mm.bot_token.clone(),
+                mm.channel_id.clone(),
+                mm.allowed_users.clone(),
+                mm.thread_replies.unwrap_or(true),
+                mm.mention_only.unwrap_or(false),
+            )))
+        }
+        "imessage" | "imessage-av" => {
+            let im: IMessageConfig =
+                toml::from_str(config_toml).context("Failed to parse iMessage config")?;
+            Ok(Arc::new(IMessageChannel::new(im.allowed_contacts.clone())))
+        }
+        "matrix" => {
+            #[cfg(feature = "channel-matrix")]
+            {
+                let mx: MatrixConfig =
+                    toml::from_str(config_toml).context("Failed to parse Matrix config")?;
+                Ok(Arc::new(
+                    MatrixChannel::new_with_session_hint_and_zeroclaw_dir(
+                        mx.homeserver.clone(),
+                        mx.access_token.clone(),
+                        mx.room_id.clone(),
+                        mx.allowed_users.clone(),
+                        mx.user_id.clone(),
+                        mx.device_id.clone(),
+                        config.config_path.parent().map(|path| path.to_path_buf()),
+                    ),
+                ))
+            }
+            #[cfg(not(feature = "channel-matrix"))]
+            {
+                anyhow::bail!("Matrix channel requires 'channel-matrix' feature")
+            }
+        }
+        "signal" => {
+            let sig: SignalConfig =
+                toml::from_str(config_toml).context("Failed to parse Signal config")?;
+            Ok(Arc::new(SignalChannel::new(
+                sig.http_url.clone(),
+                sig.account.clone(),
+                sig.group_id.clone(),
+                sig.allowed_from.clone(),
+                sig.ignore_attachments,
+                sig.ignore_stories,
+            )))
+        }
+        "whatsapp" => {
+            let wa: crate::config::schema::WhatsAppConfig =
+                toml::from_str(config_toml).context("Failed to parse WhatsApp config")?;
+            // Handle backend type detection
+            match wa.backend_type() {
+                "cloud" if wa.is_cloud_config() => Ok(Arc::new(WhatsAppChannel::new(
+                    wa.access_token.clone().unwrap_or_default(),
+                    wa.phone_number_id.clone().unwrap_or_default(),
+                    wa.verify_token.clone().unwrap_or_default(),
+                    wa.allowed_numbers.clone(),
+                ))),
+                "web" if wa.is_web_config() => {
+                    #[cfg(feature = "whatsapp-web")]
+                    {
+                        Ok(Arc::new(WhatsAppWebChannel::new(
+                            wa.session_path.clone().unwrap_or_default(),
+                            wa.pair_phone.clone(),
+                            wa.pair_code.clone(),
+                            wa.allowed_numbers.clone(),
+                        )))
+                    }
+                    #[cfg(not(feature = "whatsapp-web"))]
+                    {
+                        anyhow::bail!("WhatsApp Web requires 'whatsapp-web' feature")
+                    }
+                }
+                _ => anyhow::bail!(
+                    "WhatsApp config invalid: neither cloud nor web config is complete"
+                ),
+            }
+        }
+        "linq" => {
+            let lq: LinqConfig =
+                toml::from_str(config_toml).context("Failed to parse Linq config")?;
+            Ok(Arc::new(LinqChannel::new(
+                lq.api_token.clone(),
+                lq.from_phone.clone(),
+                lq.allowed_senders.clone(),
+            )))
+        }
+        "nextcloud-talk" | "nextcloud_talk" => {
+            let nc: NextcloudTalkConfig =
+                toml::from_str(config_toml).context("Failed to parse Nextcloud Talk config")?;
+            Ok(Arc::new(NextcloudTalkChannel::new(
+                nc.base_url.clone(),
+                nc.app_token.clone(),
+                nc.allowed_users.clone(),
+            )))
+        }
+        "email" => {
+            let email_cfg: crate::channels::email_channel::EmailConfig =
+                toml::from_str(config_toml).context("Failed to parse Email config")?;
+            Ok(Arc::new(EmailChannel::new(email_cfg)))
+        }
+        "irc" => {
+            let irc_cfg: IrcConfig =
+                toml::from_str(config_toml).context("Failed to parse IRC config")?;
+            Ok(Arc::new(IrcChannel::new(irc::IrcChannelConfig {
+                server: irc_cfg.server.clone(),
+                port: irc_cfg.port,
+                nickname: irc_cfg.nickname.clone(),
+                username: irc_cfg.username.clone(),
+                channels: irc_cfg.channels.clone(),
+                allowed_users: irc_cfg.allowed_users.clone(),
+                server_password: irc_cfg.server_password.clone(),
+                nickserv_password: irc_cfg.nickserv_password.clone(),
+                sasl_password: irc_cfg.sasl_password.clone(),
+                verify_tls: irc_cfg.verify_tls.unwrap_or(true),
+            })))
+        }
+        "lark" | "feishu" => {
+            #[cfg(feature = "channel-lark")]
+            {
+                let lk: LarkConfig =
+                    toml::from_str(config_toml).context("Failed to parse Lark/Feishu config")?;
+                Ok(Arc::new(LarkChannel::from_lark_config(&lk)))
+            }
+            #[cfg(not(feature = "channel-lark"))]
+            {
+                anyhow::bail!("Lark/Feishu channel requires 'channel-lark' feature")
+            }
+        }
+        "dingtalk" => {
+            let dt: DingTalkConfig =
+                toml::from_str(config_toml).context("Failed to parse DingTalk config")?;
+            Ok(Arc::new(DingTalkChannel::new(
+                dt.client_id.clone(),
+                dt.client_secret.clone(),
+                dt.allowed_users.clone(),
+            )))
+        }
+        "qq" => {
+            let qq_cfg: QQConfig =
+                toml::from_str(config_toml).context("Failed to parse QQ config")?;
+            Ok(Arc::new(QQChannel::new(
+                qq_cfg.app_id.clone(),
+                qq_cfg.app_secret.clone(),
+                qq_cfg.allowed_users.clone(),
+            )))
+        }
+        "nostr" => {
+            // Nostr is handled separately due to async initialization
+            anyhow::bail!("Nostr must be configured via config.toml for now")
+        }
+        "webhook" => {
+            // Webhook channels are handled differently
+            anyhow::bail!("Webhook channels are not yet supported from database")
+        }
+        "clawdtalk" => {
+            // ClawdTalk is handled separately
+            anyhow::bail!("ClawdTalk channels are not yet supported from database")
+        }
+        _ => anyhow::bail!("Unknown channel type: {}", channel_type),
+    }
+}
+
 fn collect_configured_channels(
     config: &Config,
     _matrix_skip_context: &str,
 ) -> Vec<ConfiguredChannel> {
+    // This function reads from config.toml - no longer used when DB is available
+    // Kept for backward compatibility with doctor command
     let mut channels = Vec::new();
 
     if let Some(ref tg) = config.channels_config.telegram {
@@ -2981,6 +3197,21 @@ pub async fn doctor_channels(config: Config) -> Result<()> {
 /// Start all configured channels and route messages to the agent
 #[allow(clippy::too_many_lines)]
 pub async fn start_channels(config: Config) -> Result<()> {
+    // Initialize config database to load channels from DB
+    let config_db = match ConfigDatabase::new(&config.workspace_dir) {
+        Ok(db) => {
+            tracing::info!("Loading channels from config database");
+            Some(Arc::new(db))
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Failed to initialize config database: {}. Channels will not be loaded from DB.",
+                e
+            );
+            None
+        }
+    };
+
     let provider_name = resolved_default_provider(&config);
     let provider_runtime_options = providers::ProviderRuntimeOptions {
         auth_profile_override: None,
@@ -3155,12 +3386,79 @@ pub async fn start_channels(config: Config) -> Result<()> {
         );
     }
 
-    // Collect active channels from a shared builder to keep startup and doctor parity.
-    let mut channels: Vec<Arc<dyn Channel>> =
-        collect_configured_channels(&config, "runtime startup")
-            .into_iter()
-            .map(|configured| configured.channel)
-            .collect();
+    // Collect active channels: try database first, then fallback to config.toml
+    let mut channels: Vec<Arc<dyn Channel>> = Vec::new();
+    let mut channels_loaded = false;
+
+    // Try to load from database first
+    if let Some(ref db) = config_db {
+        match db.get_active_profile() {
+            Ok(Some(profile)) => match db.get_channels(&profile.id) {
+                Ok(db_channels) => {
+                    if !db_channels.is_empty() {
+                        tracing::info!(
+                            "Loading {} channels from database for profile '{}'",
+                            db_channels.len(),
+                            profile.id
+                        );
+                        for db_channel in db_channels {
+                            if !db_channel.is_enabled {
+                                continue;
+                            }
+                            match create_channel_from_db_config(
+                                &db_channel.channel_type,
+                                &db_channel.config,
+                                &config,
+                            ) {
+                                Ok(channel) => {
+                                    channels.push(channel);
+                                    channels_loaded = true;
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Failed to create channel '{}': {}",
+                                        db_channel.channel_type,
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        tracing::info!("No channels found in database, will check config.toml");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to get channels from database: {}, falling back to config.toml",
+                        e
+                    );
+                }
+            },
+            Ok(None) => {
+                tracing::info!("No active profile found in database, falling back to config.toml");
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to get active profile from database: {}, falling back to config.toml",
+                    e
+                );
+            }
+        }
+    } else {
+        tracing::warn!("Config database not available, falling back to config.toml");
+    }
+
+    // Fallback to config.toml if no channels loaded from database
+    if !channels_loaded || channels.is_empty() {
+        tracing::info!("Loading channels from config.toml (fallback)");
+        let config_channels = collect_configured_channels(&config, "runtime startup");
+        for configured in config_channels {
+            channels.push(configured.channel);
+            channels_loaded = true;
+        }
+    }
+
+    // Nostr is always loaded from config.toml (not yet supported from DB)
 
     if let Some(ref ns) = config.channels_config.nostr {
         channels.push(Arc::new(

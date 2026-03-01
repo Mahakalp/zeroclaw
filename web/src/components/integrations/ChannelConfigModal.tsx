@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react';
 import { X, Settings, Loader2 } from 'lucide-react';
 import { FormInput } from '@/components/ui/FormInput';
 import {
+  createChannel,
   createProvider,
+  getChannels,
   getConfig,
   getProviderModels,
   getProviders,
-  putConfig,
+  updateChannel,
   updateProvider,
 } from '@/lib/api';
 
@@ -400,12 +402,8 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
 
       if (isProviderKey(channelKey)) {
         sanitizedValues.default_provider = channelKey;
-      }
-
-      const newConfig = generateChannelConfig(channelKey, sanitizedValues, configToml);
-      await putConfig(newConfig);
-
-      if (isProviderKey(channelKey)) {
+        
+        // Save provider to database
         const providers = await getProviders();
         const existing = providers.find((p) => p.name === channelKey);
         const providerPayload = {
@@ -424,6 +422,26 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
           await updateProvider(existing.id, providerPayload);
         } else {
           await createProvider(providerPayload);
+        }
+      } else {
+        // Save channel to database instead of config.toml
+        const newConfig = generateChannelConfig(channelKey, sanitizedValues, configToml);
+        
+        // Get existing channels from database
+        const channels = await getChannels();
+        const existingChannel = channels.find((c) => c.channel_type === channelKey);
+        
+        const channelPayload = {
+          profile_id: 'default',
+          channel_type: channelKey,
+          config: newConfig,
+          is_enabled: true,
+        };
+
+        if (existingChannel) {
+          await updateChannel(existingChannel.id, channelPayload);
+        } else {
+          await createChannel(channelPayload);
         }
       }
 
