@@ -10,7 +10,7 @@ use crate::runtime;
 use crate::security::SecurityPolicy;
 use crate::tools::{self, Tool};
 use crate::util::truncate_with_ellipsis;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use regex::{Regex, RegexSet};
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -2660,44 +2660,28 @@ pub async fn run(
     peripheral_overrides: Vec<String>,
     interactive: bool,
 ) -> Result<String> {
-    // ── Resolve provider from database (fallback to config.toml) ───────
-    let config_db = crate::config::db::ConfigDatabase::new(&config.workspace_dir).ok();
+    // ── Resolve provider from database ─────────────────────────────────
+    let config_db = crate::config::db::ConfigDatabase::new(&config.workspace_dir)
+        .ok()
+        .context("Config database not available")?;
     tracing::info!(workspace_dir = %config.workspace_dir.display(), "Loading config DB for provider resolution");
 
-    let (resolved_provider, resolved_api_key, resolved_api_url, resolved_model) =
-        if let Some(ref db) = config_db {
-            tracing::info!("Config DB initialized, fetching providers");
-            if let Ok(providers) = db.get_providers("default") {
-                tracing::info!(count = providers.len(), "Found providers in DB");
-                let default_provider = providers
-                    .iter()
-                    .filter(|p| p.is_default)
-                    .min_by_key(|p| p.priority);
+    let default_provider = config_db
+        .get_default_provider("default")
+        .context("Failed to query providers from database")?
+        .context("No default provider found in database. Run `zeroclaw config provider add` to add a provider.")?;
 
-                if let Some(db_provider) = default_provider {
-                    tracing::info!(
-                        provider = %db_provider.name,
-                        has_api_key = db_provider.api_key.is_some(),
-                        "Using default provider from DB"
-                    );
-                    (
-                        Some(db_provider.name.clone()),
-                        db_provider.api_key.clone(),
-                        db_provider.api_url.clone(),
-                        db_provider.default_model.clone(),
-                    )
-                } else {
-                    tracing::warn!("No provider with is_default=true in DB, no fallback available");
-                    (None, None, None, None)
-                }
-            } else {
-                tracing::warn!("Failed to get providers from DB, no fallback available");
-                (None, None, None, None)
-            }
-        } else {
-            tracing::warn!("Config DB unavailable, no fallback available");
-            (None, None, None, None)
-        };
+    let resolved_provider = Some(default_provider.name.clone());
+    let resolved_api_key = default_provider.api_key.clone();
+    let resolved_api_url = default_provider.api_url.clone();
+    let resolved_model = default_provider.default_model.clone();
+    let _resolved_temperature = default_provider.temperature;
+
+    tracing::info!(
+        provider = %resolved_provider.as_ref().unwrap(),
+        has_api_key = resolved_api_key.is_some(),
+        "Using provider from DB"
+    );
 
     // ── Wire up agnostic subsystems ──────────────────────────────
     let base_observer = observability::create_observer(&config.observability);
@@ -2735,8 +2719,41 @@ pub async fn run(
     } else {
         (None, None)
     };
-    let agents: std::collections::HashMap<String, crate::config::DelegateAgentConfig> =
-        std::collections::HashMap::new();
+
+    // Fetch agents from database
+    let db_agents = config_db
+        .get_agents("default")
+        .context("Failed to query agents from database")?;
+
+    let agents: std::collections::HashMap<String, crate::config::DelegateAgentConfig> = db_agents
+        .into_iter()
+        .map(|a| {
+            let allowed_tools: Vec<String> = a
+                .allowed_tools
+                .as_ref()
+                .and_then(|t| serde_json::from_str(t).ok())
+                .unwrap_or_default();
+            (
+                a.name.clone(),
+                crate::config::DelegateAgentConfig {
+                    provider: a.provider,
+                    model: a.model.unwrap_or_default(),
+                    system_prompt: a.system_prompt,
+                    api_key: a.api_key,
+                    temperature: a.temperature,
+                    max_depth: a.max_depth.unwrap_or(3) as u32,
+                    agentic: a.agentic,
+                    allowed_tools,
+                    max_iterations: a.max_iterations.unwrap_or(10) as usize,
+                },
+            )
+        })
+        .collect();
+
+    if !agents.is_empty() {
+        tracing::info!(count = agents.len(), "Loaded agents from DB");
+    }
+
     let mut tools_registry = tools::all_tools_with_runtime(
         Arc::new(config.clone()),
         &security,
@@ -2763,7 +2780,7 @@ pub async fn run(
     let provider_name = provider_override
         .as_deref()
         .or(resolved_provider.as_deref())
-        .unwrap_or("openrouter");
+        .context("No provider available. Run `zeroclaw config provider add` to add a provider.")?;
 
     let model_name = model_override
         .as_deref()
@@ -3178,38 +3195,21 @@ pub async fn run(
 /// Process a single message through the full agent (with tools, peripherals, memory).
 /// Used by channels (Telegram, Discord, etc.) to enable hardware and tool use.
 pub async fn process_message(config: Config, message: &str) -> Result<String> {
-    // ── Resolve provider from database (fallback to config.toml) ───────
-    let config_db = crate::config::db::ConfigDatabase::new(&config.workspace_dir).ok();
-    let (
-        resolved_provider,
-        resolved_api_key,
-        resolved_api_url,
-        resolved_model,
-        resolved_temperature,
-    ) = if let Some(ref db) = config_db {
-        if let Ok(providers) = db.get_providers("default") {
-            let default_provider = providers
-                .iter()
-                .filter(|p| p.is_default)
-                .min_by_key(|p| p.priority);
+    // ── Resolve provider from database ─────────────────────────────────
+    let config_db = crate::config::db::ConfigDatabase::new(&config.workspace_dir)
+        .ok()
+        .context("Config database not available")?;
 
-            if let Some(db_provider) = default_provider {
-                (
-                    Some(db_provider.name.clone()),
-                    db_provider.api_key.clone(),
-                    db_provider.api_url.clone(),
-                    db_provider.default_model.clone(),
-                    db_provider.temperature,
-                )
-            } else {
-                (None, None, None, None, None)
-            }
-        } else {
-            (None, None, None, None, None)
-        }
-    } else {
-        (None, None, None, None, None)
-    };
+    let default_provider = config_db
+        .get_default_provider("default")
+        .context("Failed to query providers from database")?
+        .context("No default provider found in database. Run `zeroclaw config provider add` to add a provider.")?;
+
+    let resolved_provider = Some(default_provider.name.clone());
+    let resolved_api_key = default_provider.api_key.clone();
+    let resolved_api_url = default_provider.api_url.clone();
+    let resolved_model = default_provider.default_model.clone();
+    let resolved_temperature = default_provider.temperature;
 
     let temperature = resolved_temperature.unwrap_or(0.7);
 
@@ -3236,8 +3236,41 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     } else {
         (None, None)
     };
-    let agents: std::collections::HashMap<String, crate::config::DelegateAgentConfig> =
-        std::collections::HashMap::new();
+
+    // Fetch agents from database
+    let db_agents = config_db
+        .get_agents("default")
+        .context("Failed to query agents from database")?;
+
+    let agents: std::collections::HashMap<String, crate::config::DelegateAgentConfig> = db_agents
+        .into_iter()
+        .map(|a| {
+            let allowed_tools: Vec<String> = a
+                .allowed_tools
+                .as_ref()
+                .and_then(|t| serde_json::from_str(t).ok())
+                .unwrap_or_default();
+            (
+                a.name.clone(),
+                crate::config::DelegateAgentConfig {
+                    provider: a.provider,
+                    model: a.model.unwrap_or_default(),
+                    system_prompt: a.system_prompt,
+                    api_key: a.api_key,
+                    temperature: a.temperature,
+                    max_depth: a.max_depth.unwrap_or(3) as u32,
+                    agentic: a.agentic,
+                    allowed_tools,
+                    max_iterations: a.max_iterations.unwrap_or(10) as usize,
+                },
+            )
+        })
+        .collect();
+
+    if !agents.is_empty() {
+        tracing::info!(count = agents.len(), "Loaded agents from DB");
+    }
+
     let mut tools_registry = tools::all_tools_with_runtime(
         Arc::new(config.clone()),
         &security,
@@ -3256,10 +3289,12 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         crate::peripherals::create_peripheral_tools(&config.peripherals).await?;
     tools_registry.extend(peripheral_tools);
 
-    let provider_name = resolved_provider.as_deref().unwrap_or("openrouter");
+    let provider_name = resolved_provider
+        .as_deref()
+        .context("No provider available. Run `zeroclaw config provider add` to add a provider.")?;
     let model_name = resolved_model
         .clone()
-        .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".into());
+        .context("No default model configured for provider. Run `zeroclaw config provider add` to set a default model.")?;
     let provider_runtime_options = providers::ProviderRuntimeOptions {
         auth_profile_override: None,
         zeroclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
