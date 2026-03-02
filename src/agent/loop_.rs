@@ -2662,15 +2662,24 @@ pub async fn run(
 ) -> Result<String> {
     // ── Resolve provider from database (fallback to config.toml) ───────
     let config_db = crate::config::db::ConfigDatabase::new(&config.workspace_dir).ok();
+    tracing::info!(workspace_dir = %config.workspace_dir.display(), "Loading config DB for provider resolution");
+
     let (resolved_provider, resolved_api_key, resolved_api_url, resolved_model) =
         if let Some(ref db) = config_db {
+            tracing::info!("Config DB initialized, fetching providers");
             if let Ok(providers) = db.get_providers("default") {
+                tracing::info!(count = providers.len(), "Found providers in DB");
                 let default_provider = providers
                     .iter()
                     .filter(|p| p.is_default)
                     .min_by_key(|p| p.priority);
 
                 if let Some(db_provider) = default_provider {
+                    tracing::info!(
+                        provider = %db_provider.name,
+                        has_api_key = db_provider.api_key.is_some(),
+                        "Using default provider from DB"
+                    );
                     (
                         Some(db_provider.name.clone()),
                         db_provider
@@ -2687,6 +2696,7 @@ pub async fn run(
                             .or_else(|| config.default_model.clone()),
                     )
                 } else {
+                    tracing::warn!("No provider with is_default=true in DB, using config.toml");
                     (
                         config.default_provider.clone(),
                         config.api_key.clone(),
@@ -2695,6 +2705,7 @@ pub async fn run(
                     )
                 }
             } else {
+                tracing::warn!("Failed to get providers from DB, using config.toml");
                 (
                     config.default_provider.clone(),
                     config.api_key.clone(),
@@ -2703,6 +2714,7 @@ pub async fn run(
                 )
             }
         } else {
+            tracing::warn!("Config DB unavailable, using config.toml");
             (
                 config.default_provider.clone(),
                 config.api_key.clone(),
