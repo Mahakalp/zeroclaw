@@ -1,5 +1,5 @@
 use super::traits::{Tool, ToolResult};
-use crate::config::{ClassificationRule, Config, DelegateAgentConfig, ModelRouteConfig};
+use crate::config::{ClassificationRule, Config, ModelRouteConfig};
 use crate::security::SecurityPolicy;
 use crate::util::MaybeSet;
 use async_trait::async_trait;
@@ -787,20 +787,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.success, "{:?}", result.error);
-        let output: Value = serde_json::from_str(&result.output).unwrap();
-        assert_eq!(
-            output["config"]["default"]["provider"].as_str(),
-            Some("kimi")
-        );
-        assert_eq!(
-            output["config"]["default"]["model"].as_str(),
-            Some("moonshot-v1-8k")
-        );
-        assert_eq!(
-            output["config"]["default"]["temperature"].as_f64(),
-            Some(0.2)
-        );
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("migrated to database"));
     }
 
     #[tokio::test]
@@ -887,26 +875,8 @@ mod tests {
             }))
             .await
             .unwrap();
-        assert!(upsert.success, "{:?}", upsert.error);
-
-        let get_result = tool.execute(json!({"action": "get"})).await.unwrap();
-        let output: Value = serde_json::from_str(&get_result.output).unwrap();
-        assert_eq!(output["agents"]["coder"]["provider"], json!("openai"));
-        assert_eq!(output["agents"]["coder"]["model"], json!("gpt-5.3-codex"));
-        assert_eq!(output["agents"]["coder"]["agentic"], json!(true));
-
-        let remove = tool
-            .execute(json!({
-                "action": "remove_agent",
-                "name": "coder"
-            }))
-            .await
-            .unwrap();
-        assert!(remove.success, "{:?}", remove.error);
-
-        let get_result = tool.execute(json!({"action": "get"})).await.unwrap();
-        let output: Value = serde_json::from_str(&get_result.output).unwrap();
-        assert!(output["agents"]["coder"].is_null());
+        assert!(!upsert.success);
+        assert!(upsert.error.unwrap().contains("migrated to database"));
     }
 
     #[tokio::test]
