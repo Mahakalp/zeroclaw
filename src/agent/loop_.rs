@@ -2660,6 +2660,57 @@ pub async fn run(
     peripheral_overrides: Vec<String>,
     interactive: bool,
 ) -> Result<String> {
+    // ── Resolve provider from database (fallback to config.toml) ───────
+    let config_db = crate::config::db::ConfigDatabase::new(&config.workspace_dir).ok();
+    let (resolved_provider, resolved_api_key, resolved_api_url, resolved_model) =
+        if let Some(ref db) = config_db {
+            if let Ok(providers) = db.get_providers("default") {
+                let default_provider = providers
+                    .iter()
+                    .filter(|p| p.is_default)
+                    .min_by_key(|p| p.priority);
+
+                if let Some(db_provider) = default_provider {
+                    (
+                        Some(db_provider.name.clone()),
+                        db_provider
+                            .api_key
+                            .clone()
+                            .or_else(|| config.api_key.clone()),
+                        db_provider
+                            .api_url
+                            .clone()
+                            .or_else(|| config.api_url.clone()),
+                        db_provider
+                            .default_model
+                            .clone()
+                            .or_else(|| config.default_model.clone()),
+                    )
+                } else {
+                    (
+                        config.default_provider.clone(),
+                        config.api_key.clone(),
+                        config.api_url.clone(),
+                        config.default_model.clone(),
+                    )
+                }
+            } else {
+                (
+                    config.default_provider.clone(),
+                    config.api_key.clone(),
+                    config.api_url.clone(),
+                    config.default_model.clone(),
+                )
+            }
+        } else {
+            (
+                config.default_provider.clone(),
+                config.api_key.clone(),
+                config.api_url.clone(),
+                config.default_model.clone(),
+            )
+        };
+
     // ── Wire up agnostic subsystems ──────────────────────────────
     let base_observer = observability::create_observer(&config.observability);
     let observer: Arc<dyn Observer> = Arc::from(base_observer);
@@ -2675,7 +2726,7 @@ pub async fn run(
         &config.memory,
         Some(&config.storage.provider.config),
         &config.workspace_dir,
-        config.api_key.as_deref(),
+        resolved_api_key.as_deref(),
     )?);
     tracing::info!(backend = mem.name(), "Memory initialized");
 
@@ -2707,7 +2758,7 @@ pub async fn run(
         &config.http_request,
         &config.workspace_dir,
         &config.agents,
-        config.api_key.as_deref(),
+        resolved_api_key.as_deref(),
         &config,
     );
 
@@ -2721,12 +2772,12 @@ pub async fn run(
     // ── Resolve provider ─────────────────────────────────────────
     let provider_name = provider_override
         .as_deref()
-        .or(config.default_provider.as_deref())
+        .or(resolved_provider.as_deref())
         .unwrap_or("openrouter");
 
     let model_name = model_override
         .as_deref()
-        .or(config.default_model.as_deref())
+        .or(resolved_model.as_deref())
         .unwrap_or("anthropic/claude-sonnet-4");
 
     let provider_runtime_options = providers::ProviderRuntimeOptions {
@@ -2738,8 +2789,8 @@ pub async fn run(
 
     let provider: Box<dyn Provider> = providers::create_routed_provider_with_options(
         provider_name,
-        config.api_key.as_deref(),
-        config.api_url.as_deref(),
+        resolved_api_key.as_deref(),
+        resolved_api_url.as_deref(),
         &config.reliability,
         &config.model_routes,
         model_name,
@@ -3137,6 +3188,57 @@ pub async fn run(
 /// Process a single message through the full agent (with tools, peripherals, memory).
 /// Used by channels (Telegram, Discord, etc.) to enable hardware and tool use.
 pub async fn process_message(config: Config, message: &str) -> Result<String> {
+    // ── Resolve provider from database (fallback to config.toml) ───────
+    let config_db = crate::config::db::ConfigDatabase::new(&config.workspace_dir).ok();
+    let (resolved_provider, resolved_api_key, resolved_api_url, resolved_model) =
+        if let Some(ref db) = config_db {
+            if let Ok(providers) = db.get_providers("default") {
+                let default_provider = providers
+                    .iter()
+                    .filter(|p| p.is_default)
+                    .min_by_key(|p| p.priority);
+
+                if let Some(db_provider) = default_provider {
+                    (
+                        Some(db_provider.name.clone()),
+                        db_provider
+                            .api_key
+                            .clone()
+                            .or_else(|| config.api_key.clone()),
+                        db_provider
+                            .api_url
+                            .clone()
+                            .or_else(|| config.api_url.clone()),
+                        db_provider
+                            .default_model
+                            .clone()
+                            .or_else(|| config.default_model.clone()),
+                    )
+                } else {
+                    (
+                        config.default_provider.clone(),
+                        config.api_key.clone(),
+                        config.api_url.clone(),
+                        config.default_model.clone(),
+                    )
+                }
+            } else {
+                (
+                    config.default_provider.clone(),
+                    config.api_key.clone(),
+                    config.api_url.clone(),
+                    config.default_model.clone(),
+                )
+            }
+        } else {
+            (
+                config.default_provider.clone(),
+                config.api_key.clone(),
+                config.api_url.clone(),
+                config.default_model.clone(),
+            )
+        };
+
     let observer: Arc<dyn Observer> =
         Arc::from(observability::create_observer(&config.observability));
     let runtime: Arc<dyn runtime::RuntimeAdapter> =
@@ -3149,7 +3251,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         &config.memory,
         Some(&config.storage.provider.config),
         &config.workspace_dir,
-        config.api_key.as_deref(),
+        resolved_api_key.as_deref(),
     )?);
 
     let (composio_key, composio_entity_id) = if config.composio.enabled {
@@ -3171,16 +3273,15 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         &config.http_request,
         &config.workspace_dir,
         &config.agents,
-        config.api_key.as_deref(),
+        resolved_api_key.as_deref(),
         &config,
     );
     let peripheral_tools: Vec<Box<dyn Tool>> =
         crate::peripherals::create_peripheral_tools(&config.peripherals).await?;
     tools_registry.extend(peripheral_tools);
 
-    let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
-    let model_name = config
-        .default_model
+    let provider_name = resolved_provider.as_deref().unwrap_or("openrouter");
+    let model_name = resolved_model
         .clone()
         .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".into());
     let provider_runtime_options = providers::ProviderRuntimeOptions {
@@ -3191,8 +3292,8 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     };
     let provider: Box<dyn Provider> = providers::create_routed_provider_with_options(
         provider_name,
-        config.api_key.as_deref(),
-        config.api_url.as_deref(),
+        resolved_api_key.as_deref(),
+        resolved_api_url.as_deref(),
         &config.reliability,
         &config.model_routes,
         &model_name,
