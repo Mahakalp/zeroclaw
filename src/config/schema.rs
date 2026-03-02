@@ -70,6 +70,27 @@ pub struct Config {
     #[serde(skip)]
     pub config_path: PathBuf,
 
+    /// API key for the selected provider. Overridden by `ZEROCLAW_API_KEY` or `API_KEY` env vars.
+    /// NOTE: This field is deprecated. Provider config should be read from database.
+    #[serde(default, skip)]
+    pub api_key: Option<String>,
+    /// Base URL override for provider API (e.g. "http://10.0.0.1:11434" for remote Ollama)
+    /// NOTE: This field is deprecated. Provider config should be read from database.
+    #[serde(default, skip)]
+    pub api_url: Option<String>,
+    /// Default provider ID or alias (e.g. `"openrouter"`, `"ollama"`, `"anthropic"`). Default: `"openrouter"`.
+    /// NOTE: This field is deprecated. Provider config should be read from database.
+    #[serde(default, skip)]
+    pub default_provider: Option<String>,
+    /// Default model routed through the selected provider (e.g. `"anthropic/claude-sonnet-4-6"`).
+    /// NOTE: This field is deprecated. Provider config should be read from database.
+    #[serde(default, skip)]
+    pub default_model: Option<String>,
+    /// Default model temperature (0.0–2.0). Default: `0.7`.
+    /// NOTE: This field is deprecated. Provider config should be read from database.
+    #[serde(default, skip)]
+    pub default_temperature: f64,
+
     /// Observability backend configuration (`[observability]`).
     #[serde(default)]
     pub observability: ObservabilityConfig,
@@ -189,6 +210,11 @@ pub struct Config {
     /// Peripheral board configuration for hardware integration (`[peripherals]`).
     #[serde(default)]
     pub peripherals: PeripheralsConfig,
+
+    /// Delegate agent configurations for multi-agent workflows.
+    /// NOTE: This field is deprecated. Agent config should be read from database.
+    #[serde(default, skip)]
+    pub agents: HashMap<String, DelegateAgentConfig>,
 
     /// Hooks configuration (lifecycle hooks and built-in hook toggles).
     #[serde(default)]

@@ -24,7 +24,7 @@ use console::style;
 use dialoguer::{Confirm, Input, Select};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -127,9 +127,15 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
 
     // ── Build config ──
     // Defaults: SQLite memory, supervised autonomy, workspace-scoped, native runtime
+    // NOTE: api_key, default_provider, etc. are deprecated - provider is saved to DB separately
     let config = Config {
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
+        api_key: None,
+        api_url: None,
+        default_provider: Some(provider.clone()),
+        default_model: Some(model.clone()),
+        default_temperature: 0.7,
         observability: ObservabilityConfig::default(),
         autonomy: AutonomyConfig::default(),
         security: crate::config::SecurityConfig::default(),
@@ -159,6 +165,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         identity: crate::config::IdentityConfig::default(),
         cost: crate::config::CostConfig::default(),
         peripherals: crate::config::PeripheralsConfig::default(),
+        agents: HashMap::new(),
         hooks: crate::config::HooksConfig::default(),
         hardware: hardware_config,
         query_classification: crate::config::QueryClassificationConfig::default(),
@@ -483,6 +490,11 @@ async fn run_quick_setup_with_home(
     let config = Config {
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
+        api_key: None,
+        api_url: None,
+        default_provider: Some(provider_name.clone()),
+        default_model: Some(model.clone()),
+        default_temperature: 0.7,
         observability: ObservabilityConfig::default(),
         autonomy: AutonomyConfig::default(),
         security: crate::config::SecurityConfig::default(),
@@ -512,6 +524,7 @@ async fn run_quick_setup_with_home(
         identity: crate::config::IdentityConfig::default(),
         cost: crate::config::CostConfig::default(),
         peripherals: crate::config::PeripheralsConfig::default(),
+        agents: HashMap::new(),
         hooks: crate::config::HooksConfig::default(),
         hardware: crate::config::HardwareConfig::default(),
         query_classification: crate::config::QueryClassificationConfig::default(),
@@ -5525,6 +5538,7 @@ async fn save_provider_and_agent_to_db(
     let db = ConfigDatabase::new(&workspace_dir.to_path_buf())?;
 
     let now = Utc::now().to_rfc3339();
+    let created_at = now.clone();
     let provider = Provider {
         id: Uuid::new_v4().to_string(),
         profile_id: "default".to_string(),
@@ -5537,7 +5551,7 @@ async fn save_provider_and_agent_to_db(
         is_default: true,
         priority: 0,
         metadata: None,
-        created_at: now.clone(),
+        created_at,
         updated_at: now,
     };
 
@@ -5546,6 +5560,8 @@ async fn save_provider_and_agent_to_db(
     let default_system_prompt =
         "You are ZeroClaw, an AI assistant powered by ZeroClaw. Be warm, natural, and clear.";
 
+    let now = Utc::now().to_rfc3339();
+    let created_at = now.clone();
     let agent = Agent {
         id: Uuid::new_v4().to_string(),
         profile_id: "default".to_string(),
@@ -5561,7 +5577,7 @@ async fn save_provider_and_agent_to_db(
         allowed_tools: None,
         max_iterations: Some(100),
         metadata: None,
-        created_at: now.clone(),
+        created_at,
         updated_at: now,
     };
 

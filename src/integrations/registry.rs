@@ -1,8 +1,52 @@
 use super::{IntegrationCategory, IntegrationEntry, IntegrationStatus};
+use crate::config::ConfigDatabase;
 use crate::providers::{
     is_glm_alias, is_minimax_alias, is_moonshot_alias, is_qianfan_alias, is_qwen_alias,
     is_zai_alias,
 };
+
+fn get_default_provider_name(config: &crate::config::Config) -> Option<String> {
+    let workspace_dir = &config.workspace_dir;
+    match ConfigDatabase::new(workspace_dir) {
+        Ok(db) => db
+            .get_default_provider("default")
+            .ok()
+            .flatten()
+            .map(|p| p.name),
+        Err(_) => None,
+    }
+}
+
+fn get_default_provider_api_key(config: &crate::config::Config) -> Option<String> {
+    let workspace_dir = &config.workspace_dir;
+    match ConfigDatabase::new(workspace_dir) {
+        Ok(db) => db
+            .get_default_provider("default")
+            .ok()
+            .flatten()
+            .and_then(|p| p.api_key),
+        Err(_) => None,
+    }
+}
+
+fn get_default_model(config: &crate::config::Config) -> Option<String> {
+    let workspace_dir = &config.workspace_dir;
+    match ConfigDatabase::new(workspace_dir) {
+        Ok(db) => db
+            .get_default_provider("default")
+            .ok()
+            .flatten()
+            .and_then(|p| p.default_model),
+        Err(_) => None,
+    }
+}
+
+fn is_provider_active(config: &crate::config::Config, alias_check: fn(&str) -> bool) -> bool {
+    if let Some(provider_name) = get_default_provider_name(config) {
+        return alias_check(&provider_name);
+    }
+    false
+}
 
 /// Returns the full catalog of integrations
 #[allow(clippy::too_many_lines)]
@@ -165,8 +209,10 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "200+ models, 1 API key",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("openrouter")
-                    && c.api_key.as_deref().is_some_and(|k| !k.trim().is_empty())
+                let provider_name = get_default_provider_name(c);
+                let api_key = get_default_provider_api_key(c);
+                if provider_name.as_deref() == Some("openrouter")
+                    && api_key.as_deref().is_some_and(|k| !k.trim().is_empty())
                 {
                     IntegrationStatus::Active
                 } else {
@@ -179,7 +225,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Claude 3.5/4 Sonnet & Opus",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("anthropic") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("anthropic") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -191,7 +238,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "GPT-4o, GPT-5, o1",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("openai") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("openai") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -203,10 +251,12 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Gemini 2.5 Pro/Flash",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider
+                let provider_name = get_default_provider_name(c);
+                let model = get_default_model(c);
+                if provider_name
                     .as_deref()
                     .is_some_and(|p| p == "google" || p == "gemini" || p == "google-gemini")
-                    || c.default_model
+                    || model
                         .as_deref()
                         .is_some_and(|m| m.starts_with("google/") || m.starts_with("gemini"))
                 {
@@ -221,10 +271,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "DeepSeek V3 & R1",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_model
-                    .as_deref()
-                    .is_some_and(|m| m.starts_with("deepseek/"))
-                {
+                let model = get_default_model(c);
+                if model.as_deref().is_some_and(|m| m.starts_with("deepseek/")) {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -236,10 +284,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Grok 3 & 4",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_model
-                    .as_deref()
-                    .is_some_and(|m| m.starts_with("x-ai/"))
-                {
+                let model = get_default_model(c);
+                if model.as_deref().is_some_and(|m| m.starts_with("x-ai/")) {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -251,10 +297,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Mistral Large & Codestral",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_model
-                    .as_deref()
-                    .is_some_and(|m| m.starts_with("mistral"))
-                {
+                let model = get_default_model(c);
+                if model.as_deref().is_some_and(|m| m.starts_with("mistral")) {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -266,7 +310,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Local models (Llama, etc.)",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("ollama") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("ollama") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -278,7 +323,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Search-augmented AI",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("perplexity") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("perplexity") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -302,7 +348,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Privacy-first inference (Llama, Opus)",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("venice") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("venice") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -314,7 +361,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Vercel AI Gateway",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("vercel") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("vercel") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -326,7 +374,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Cloudflare AI Gateway",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("cloudflare") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("cloudflare") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -338,7 +387,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Kimi & Kimi Coding",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref().is_some_and(is_moonshot_alias) {
+                if is_provider_active(c, is_moonshot_alias) {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -350,7 +399,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Synthetic AI models",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("synthetic") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("synthetic") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -362,7 +412,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Code-focused AI models",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("opencode") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("opencode") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -374,7 +425,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Z.AI inference",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref().is_some_and(is_zai_alias) {
+                if is_provider_active(c, is_zai_alias) {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -386,7 +437,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "ChatGLM / Zhipu models",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref().is_some_and(is_glm_alias) {
+                if is_provider_active(c, is_glm_alias) {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -398,7 +449,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "MiniMax AI models",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref().is_some_and(is_minimax_alias) {
+                if is_provider_active(c, is_minimax_alias) {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -410,7 +461,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Alibaba DashScope Qwen models",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref().is_some_and(is_qwen_alias) {
+                if is_provider_active(c, is_qwen_alias) {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -422,7 +473,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "AWS managed model access",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("bedrock") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("bedrock") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -434,7 +486,7 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Baidu AI models",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref().is_some_and(is_qianfan_alias) {
+                if is_provider_active(c, is_qianfan_alias) {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -446,7 +498,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Ultra-fast LPU inference",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("groq") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("groq") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -458,7 +511,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Open-source model hosting",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("together") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("together") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -470,7 +524,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Fast open-source inference",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("fireworks") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("fireworks") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
@@ -482,7 +537,8 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             description: "Command R+ & embeddings",
             category: IntegrationCategory::AiModel,
             status_fn: |c| {
-                if c.default_provider.as_deref() == Some("cohere") {
+                let provider_name = get_default_provider_name(c);
+                if provider_name.as_deref() == Some("cohere") {
                     IntegrationStatus::Active
                 } else {
                     IntegrationStatus::Available
