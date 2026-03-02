@@ -477,7 +477,7 @@ mod tests {
         let mut headers = axum::http::HeaderMap::new();
         assert!(!has_cloudflare_access_headers(&headers));
 
-        headers.insert("CF_Access_JWT", "test.jwt".parse().unwrap());
+        headers.insert("cf-access-jwt-assertion", "test.jwt".parse().unwrap());
         assert!(has_cloudflare_access_headers(&headers));
     }
 
