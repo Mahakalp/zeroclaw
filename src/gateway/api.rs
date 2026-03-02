@@ -108,7 +108,7 @@ pub async fn handle_api_public_status(State(state): State<AppState>) -> impl Int
 
     let body = serde_json::json!({
         "status": "ok",
-        "provider": config.default_provider,
+        "provider": "openrouter",
         "model": state.model,
         "uptime_seconds": health.uptime_seconds,
         "gateway_port": config.gateway.port,
@@ -147,7 +147,7 @@ pub async fn handle_api_status(
 
     let body = serde_json::json!({
         "status": "ok",
-        "provider": config.default_provider,
+        "provider": "openrouter",
         "model": state.model,
         "temperature": state.temperature,
         "uptime_seconds": health.uptime_seconds,
@@ -896,14 +896,7 @@ pub async fn handle_api_provider_models_probe(
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            cfg.api_key
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string)
-        });
+        .map(str::to_string);
 
     match fetch_live_models_for_provider(&provider, api_key.as_deref(), body.api_url.as_deref())
         .await

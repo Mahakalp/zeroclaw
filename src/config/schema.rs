@@ -69,16 +69,6 @@ pub struct Config {
     /// Path to config.toml - computed from home, not serialized
     #[serde(skip)]
     pub config_path: PathBuf,
-    /// API key for the selected provider. Overridden by `ZEROCLAW_API_KEY` or `API_KEY` env vars.
-    pub api_key: Option<String>,
-    /// Base URL override for provider API (e.g. "http://10.0.0.1:11434" for remote Ollama)
-    pub api_url: Option<String>,
-    /// Default provider ID or alias (e.g. `"openrouter"`, `"ollama"`, `"anthropic"`). Default: `"openrouter"`.
-    pub default_provider: Option<String>,
-    /// Default model routed through the selected provider (e.g. `"anthropic/claude-sonnet-4-6"`).
-    pub default_model: Option<String>,
-    /// Default model temperature (0.0–2.0). Default: `0.7`.
-    pub default_temperature: f64,
 
     /// Observability backend configuration (`[observability]`).
     #[serde(default)]
@@ -199,10 +189,6 @@ pub struct Config {
     /// Peripheral board configuration for hardware integration (`[peripherals]`).
     #[serde(default)]
     pub peripherals: PeripheralsConfig,
-
-    /// Delegate agent configurations for multi-agent workflows.
-    #[serde(default)]
-    pub agents: HashMap<String, DelegateAgentConfig>,
 
     /// Hooks configuration (lifecycle hooks and built-in hook toggles).
     #[serde(default)]
@@ -4061,7 +4047,6 @@ impl Config {
             config.config_path = config_path.clone();
             config.workspace_dir = workspace_dir;
             let store = crate::security::SecretStore::new(&zeroclaw_dir, config.secrets.encrypt);
-            decrypt_optional_secret(&store, &mut config.api_key, "config.api_key")?;
             decrypt_optional_secret(
                 &store,
                 &mut config.composio.api_key,
@@ -4085,10 +4070,6 @@ impl Config {
                 &mut config.storage.provider.config.db_url,
                 "config.storage.provider.config.db_url",
             )?;
-
-            for agent in config.agents.values_mut() {
-                decrypt_optional_secret(&store, &mut agent.api_key, "config.agents.*.api_key")?;
-            }
 
             if let Some(ref mut ns) = config.channels_config.nostr {
                 decrypt_secret(
@@ -4546,7 +4527,6 @@ impl Config {
             .context("Config path must have a parent directory")?;
         let store = crate::security::SecretStore::new(zeroclaw_dir, self.secrets.encrypt);
 
-        encrypt_optional_secret(&store, &mut config_to_save.api_key, "config.api_key")?;
         encrypt_optional_secret(
             &store,
             &mut config_to_save.composio.api_key,
@@ -4570,10 +4550,6 @@ impl Config {
             &mut config_to_save.storage.provider.config.db_url,
             "config.storage.provider.config.db_url",
         )?;
-
-        for agent in config_to_save.agents.values_mut() {
-            encrypt_optional_secret(&store, &mut agent.api_key, "config.agents.*.api_key")?;
-        }
 
         if let Some(ref mut ns) = config_to_save.channels_config.nostr {
             encrypt_secret(

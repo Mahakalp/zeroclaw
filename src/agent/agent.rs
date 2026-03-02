@@ -230,7 +230,15 @@ impl Agent {
         self.history.clear();
     }
 
-    pub fn from_config(config: &Config) -> Result<Self> {
+    pub fn from_config(
+        config: &Config,
+        provider_name: &str,
+        api_key: Option<&str>,
+        api_url: Option<&str>,
+        model_name: &str,
+        temperature: f64,
+        agents: &std::collections::HashMap<String, crate::config::DelegateAgentConfig>,
+    ) -> Result<Self> {
         let observer: Arc<dyn Observer> =
             Arc::from(observability::create_observer(&config.observability));
         let runtime: Arc<dyn runtime::RuntimeAdapter> =
@@ -245,7 +253,7 @@ impl Agent {
             &config.embedding_routes,
             Some(&config.storage.provider.config),
             &config.workspace_dir,
-            config.api_key.as_deref(),
+            api_key,
         )?);
 
         let composio_key = if config.composio.enabled {
@@ -269,26 +277,18 @@ impl Agent {
             &config.browser,
             &config.http_request,
             &config.workspace_dir,
-            &config.agents,
-            config.api_key.as_deref(),
+            agents,
+            api_key,
             config,
         );
 
-        let provider_name = config.default_provider.as_deref().unwrap_or("openrouter");
-
-        let model_name = config
-            .default_model
-            .as_deref()
-            .unwrap_or("anthropic/claude-sonnet-4-20250514")
-            .to_string();
-
         let provider: Box<dyn Provider> = providers::create_routed_provider(
             provider_name,
-            config.api_key.as_deref(),
-            config.api_url.as_deref(),
+            api_key,
+            api_url,
             &config.reliability,
             &config.model_routes,
-            &model_name,
+            model_name,
         )?;
 
         let dispatcher_choice = config.agent.tool_dispatcher.as_str();
@@ -314,8 +314,8 @@ impl Agent {
             )))
             .prompt_builder(SystemPromptBuilder::with_defaults())
             .config(config.agent.clone())
-            .model_name(model_name)
-            .temperature(config.default_temperature)
+            .model_name(model_name.to_string())
+            .temperature(temperature)
             .workspace_dir(config.workspace_dir.clone())
             .classification_config(config.query_classification.clone())
             .available_hints(available_hints)
@@ -573,27 +573,21 @@ pub async fn run(
 ) -> Result<()> {
     let start = Instant::now();
 
-    let mut effective_config = config;
-    if let Some(p) = provider_override {
-        effective_config.default_provider = Some(p);
-    }
-    if let Some(m) = model_override {
-        effective_config.default_model = Some(m);
-    }
-    effective_config.default_temperature = temperature;
+    let provider_name = provider_override.unwrap_or_else(|| "openrouter".to_string());
+    let model_name =
+        model_override.unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string());
+    let agents: std::collections::HashMap<String, crate::config::DelegateAgentConfig> =
+        std::collections::HashMap::new();
 
-    let mut agent = Agent::from_config(&effective_config)?;
-
-    let provider_name = effective_config
-        .default_provider
-        .as_deref()
-        .unwrap_or("openrouter")
-        .to_string();
-    let model_name = effective_config
-        .default_model
-        .as_deref()
-        .unwrap_or("anthropic/claude-sonnet-4-20250514")
-        .to_string();
+    let mut agent = Agent::from_config(
+        &config,
+        &provider_name,
+        None,
+        None,
+        &model_name,
+        temperature,
+        &agents,
+    )?;
 
     agent.observer.record_event(&ObserverEvent::AgentStart {
         provider: provider_name.clone(),

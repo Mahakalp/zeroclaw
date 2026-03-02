@@ -347,43 +347,19 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
 
             if let Some(db_provider) = default_provider {
                 (
-                    db_provider
-                        .api_key
-                        .clone()
-                        .or_else(|| config.api_key.clone()),
-                    db_provider
-                        .api_url
-                        .clone()
-                        .or_else(|| config.api_url.clone()),
-                    db_provider
-                        .default_model
-                        .clone()
-                        .or_else(|| config.default_model.clone()),
+                    db_provider.api_key.clone(),
+                    db_provider.api_url.clone(),
+                    db_provider.default_model.clone(),
                     Some(db_provider.name.clone()),
                 )
             } else {
-                (
-                    config.api_key.clone(),
-                    config.api_url.clone(),
-                    config.default_model.clone(),
-                    config.default_provider.clone(),
-                )
+                (None, None, None, None)
             }
         } else {
-            (
-                config.api_key.clone(),
-                config.api_url.clone(),
-                config.default_model.clone(),
-                config.default_provider.clone(),
-            )
+            (None, None, None, None)
         }
     } else {
-        (
-            config.api_key.clone(),
-            config.api_url.clone(),
-            config.default_model.clone(),
-            config.default_provider.clone(),
-        )
+        (None, None, None, None)
     };
 
     // ── Hooks ──────────────────────────────────────────────────────
@@ -412,8 +388,8 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     )?);
     let model = default_model
         .clone()
-        .unwrap_or_else(|| "anthropic/claude-sonnet-4".into());
-    let temperature = config.default_temperature;
+        .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string());
+    let temperature = 0.7;
     let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
         &config.memory,
         Some(&config.storage.provider.config),
@@ -446,8 +422,8 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         &config.browser,
         &config.http_request,
         &config.workspace_dir,
-        &config.agents,
-        config.api_key.as_deref(),
+        &std::collections::HashMap::new(),
+        None,
         &config,
     );
     let tools_registry: Arc<Vec<ToolSpec>> =
@@ -992,12 +968,7 @@ async fn handle_webhook(
             .await;
     }
 
-    let provider_label = state
-        .config
-        .lock()
-        .default_provider
-        .clone()
-        .unwrap_or_else(|| "unknown".to_string());
+    let provider_label = "openrouter".to_string();
     let model_label = state.model.clone();
     let started_at = Instant::now();
 

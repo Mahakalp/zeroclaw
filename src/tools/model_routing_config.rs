@@ -256,32 +256,13 @@ impl ModelRoutingConfigTool {
             })
             .collect();
 
-        let mut agents: BTreeMap<String, Value> = BTreeMap::new();
-        for (name, agent) in &cfg.agents {
-            agents.insert(
-                name.clone(),
-                json!({
-                    "provider": agent.provider,
-                    "model": agent.model,
-                    "system_prompt": agent.system_prompt,
-                    "api_key_configured": agent
-                        .api_key
-                        .as_ref()
-                        .is_some_and(|value| !value.trim().is_empty()),
-                    "temperature": agent.temperature,
-                    "max_depth": agent.max_depth,
-                    "agentic": agent.agentic,
-                    "allowed_tools": agent.allowed_tools,
-                    "max_iterations": agent.max_iterations,
-                }),
-            );
-        }
+        let agents: BTreeMap<String, Value> = BTreeMap::new();
 
         json!({
             "default": {
-                "provider": cfg.default_provider,
-                "model": cfg.default_model,
-                "temperature": cfg.default_temperature,
+                "provider": "openrouter",
+                "model": "anthropic/claude-sonnet-4-20250514",
+                "temperature": 0.7,
             },
             "query_classification": {
                 "enabled": cfg.query_classification.enabled,
@@ -387,43 +368,7 @@ impl ModelRoutingConfigTool {
             anyhow::bail!("set_default requires at least one of: provider, model, temperature");
         }
 
-        let mut cfg = self.load_config_without_env()?;
-
-        match provider_update {
-            MaybeSet::Set(provider) => cfg.default_provider = Some(provider),
-            MaybeSet::Null => cfg.default_provider = None,
-            MaybeSet::Unset => {}
-        }
-
-        match model_update {
-            MaybeSet::Set(model) => cfg.default_model = Some(model),
-            MaybeSet::Null => cfg.default_model = None,
-            MaybeSet::Unset => {}
-        }
-
-        match temperature_update {
-            MaybeSet::Set(temperature) => {
-                if !(0.0..=2.0).contains(&temperature) {
-                    anyhow::bail!("'temperature' must be between 0.0 and 2.0");
-                }
-                cfg.default_temperature = temperature;
-            }
-            MaybeSet::Null => {
-                cfg.default_temperature = Config::default().default_temperature;
-            }
-            MaybeSet::Unset => {}
-        }
-
-        cfg.save().await?;
-
-        Ok(ToolResult {
-            success: true,
-            output: serde_json::to_string_pretty(&json!({
-                "message": "Default provider/model settings updated",
-                "config": Self::snapshot(&cfg),
-            }))?,
-            error: None,
-        })
+        anyhow::bail!("Default provider/model/temperature configuration has been migrated to database. Use provider CRUD API instead.");
     }
 
     async fn handle_upsert_scenario(&self, args: &Value) -> anyhow::Result<ToolResult> {
@@ -604,114 +549,12 @@ impl ModelRoutingConfigTool {
         })
     }
 
-    async fn handle_upsert_agent(&self, args: &Value) -> anyhow::Result<ToolResult> {
-        let name = Self::parse_non_empty_string(args, "name")?;
-        let provider = Self::parse_non_empty_string(args, "provider")?;
-        let model = Self::parse_non_empty_string(args, "model")?;
+    async fn handle_upsert_agent(&self, _args: &Value) -> anyhow::Result<ToolResult> {
+        anyhow::bail!("Delegate agent configuration has been migrated to database. Use agent CRUD API instead.");
+    }
 
-        let system_prompt_update = Self::parse_optional_string_update(args, "system_prompt")?;
-        let api_key_update = Self::parse_optional_string_update(args, "api_key")?;
-        let temperature_update = Self::parse_optional_f64_update(args, "temperature")?;
-        let max_depth_update = Self::parse_optional_u32_update(args, "max_depth")?;
-        let max_iterations_update = Self::parse_optional_usize_update(args, "max_iterations")?;
-        let agentic_update = Self::parse_optional_bool(args, "agentic")?;
-
-        let allowed_tools_update = if let Some(raw) = args.get("allowed_tools") {
-            Some(Self::parse_string_list(raw, "allowed_tools")?)
-        } else {
-            None
-        };
-
-        let mut cfg = self.load_config_without_env()?;
-
-        let mut next_agent = cfg
-            .agents
-            .get(&name)
-            .cloned()
-            .unwrap_or(DelegateAgentConfig {
-                provider: provider.clone(),
-                model: model.clone(),
-                system_prompt: None,
-                api_key: None,
-                temperature: None,
-                max_depth: DEFAULT_AGENT_MAX_DEPTH,
-                agentic: false,
-                allowed_tools: Vec::new(),
-                max_iterations: DEFAULT_AGENT_MAX_ITERATIONS,
-            });
-
-        next_agent.provider = provider;
-        next_agent.model = model;
-
-        match system_prompt_update {
-            MaybeSet::Set(value) => next_agent.system_prompt = Some(value),
-            MaybeSet::Null => next_agent.system_prompt = None,
-            MaybeSet::Unset => {}
-        }
-
-        match api_key_update {
-            MaybeSet::Set(value) => next_agent.api_key = Some(value),
-            MaybeSet::Null => next_agent.api_key = None,
-            MaybeSet::Unset => {}
-        }
-
-        match temperature_update {
-            MaybeSet::Set(value) => {
-                if !(0.0..=2.0).contains(&value) {
-                    anyhow::bail!("'temperature' must be between 0.0 and 2.0");
-                }
-                next_agent.temperature = Some(value);
-            }
-            MaybeSet::Null => next_agent.temperature = None,
-            MaybeSet::Unset => {}
-        }
-
-        match max_depth_update {
-            MaybeSet::Set(value) => next_agent.max_depth = value,
-            MaybeSet::Null => next_agent.max_depth = DEFAULT_AGENT_MAX_DEPTH,
-            MaybeSet::Unset => {}
-        }
-
-        match max_iterations_update {
-            MaybeSet::Set(value) => next_agent.max_iterations = value,
-            MaybeSet::Null => next_agent.max_iterations = DEFAULT_AGENT_MAX_ITERATIONS,
-            MaybeSet::Unset => {}
-        }
-
-        if let Some(agentic) = agentic_update {
-            next_agent.agentic = agentic;
-        }
-
-        if let Some(allowed_tools) = allowed_tools_update {
-            next_agent.allowed_tools = allowed_tools;
-        }
-
-        if next_agent.max_depth == 0 {
-            anyhow::bail!("'max_depth' must be greater than 0");
-        }
-
-        if next_agent.max_iterations == 0 {
-            anyhow::bail!("'max_iterations' must be greater than 0");
-        }
-
-        if next_agent.agentic && next_agent.allowed_tools.is_empty() {
-            anyhow::bail!(
-                "Agent '{name}' has agentic=true but allowed_tools is empty. Set allowed_tools or disable agentic mode."
-            );
-        }
-
-        cfg.agents.insert(name.clone(), next_agent);
-        cfg.save().await?;
-
-        Ok(ToolResult {
-            success: true,
-            output: serde_json::to_string_pretty(&json!({
-                "message": "Delegate agent upserted",
-                "name": name,
-                "config": Self::snapshot(&cfg),
-            }))?,
-            error: None,
-        })
+    async fn handle_delete_agent(&self, _args: &Value) -> anyhow::Result<ToolResult> {
+        anyhow::bail!("Delegate agent configuration has been migrated to database. Use agent CRUD API instead.");
     }
 
     async fn handle_remove_agent(&self, args: &Value) -> anyhow::Result<ToolResult> {

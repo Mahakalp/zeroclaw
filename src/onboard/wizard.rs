@@ -127,15 +127,6 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
     let config = Config {
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
-        api_key: if api_key.is_empty() {
-            None
-        } else {
-            Some(api_key)
-        },
-        api_url: provider_api_url,
-        default_provider: Some(provider),
-        default_model: Some(model),
-        default_temperature: 0.7,
         observability: ObservabilityConfig::default(),
         autonomy: AutonomyConfig::default(),
         security: crate::config::SecurityConfig::default(),
@@ -165,7 +156,6 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         identity: crate::config::IdentityConfig::default(),
         cost: crate::config::CostConfig::default(),
         peripherals: crate::config::PeripheralsConfig::default(),
-        agents: std::collections::HashMap::new(),
         hooks: crate::config::HooksConfig::default(),
         hardware: hardware_config,
         query_classification: crate::config::QueryClassificationConfig::default(),
@@ -193,7 +183,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
     // ── Offer to launch channels immediately ─────────────────────
     let has_channels = has_launchable_channels(&config.channels_config);
 
-    if has_channels && config.api_key.is_some() {
+    if has_channels {
         let launch: bool = Confirm::new()
             .with_prompt(format!(
                 "  {} Launch channels now? (connected channels → AI → reply)",
@@ -245,7 +235,7 @@ pub async fn run_channels_repair_wizard() -> Result<Config> {
 
     let has_channels = has_launchable_channels(&config.channels_config);
 
-    if has_channels && config.api_key.is_some() {
+    if has_channels {
         let launch: bool = Confirm::new()
             .with_prompt(format!(
                 "  {} Launch channels now? (connected channels → AI → reply)",
@@ -308,7 +298,7 @@ async fn run_provider_update_wizard(workspace_dir: &Path, config_path: &Path) ->
     print_summary(&config);
 
     let has_channels = has_launchable_channels(&config.channels_config);
-    if has_channels && config.api_key.is_some() {
+    if has_channels {
         let launch: bool = Confirm::new()
             .with_prompt(format!(
                 "  {} Launch channels now? (connected channels → AI → reply)",
@@ -477,15 +467,6 @@ async fn run_quick_setup_with_home(
     let config = Config {
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
-        api_key: credential_override.map(|c| {
-            let mut s = String::with_capacity(c.len());
-            s.push_str(c);
-            s
-        }),
-        api_url: None,
-        default_provider: Some(provider_name.clone()),
-        default_model: Some(model.clone()),
-        default_temperature: 0.7,
         observability: ObservabilityConfig::default(),
         autonomy: AutonomyConfig::default(),
         security: crate::config::SecurityConfig::default(),
@@ -515,7 +496,6 @@ async fn run_quick_setup_with_home(
         identity: crate::config::IdentityConfig::default(),
         cost: crate::config::CostConfig::default(),
         peripherals: crate::config::PeripheralsConfig::default(),
-        agents: std::collections::HashMap::new(),
         hooks: crate::config::HooksConfig::default(),
         hardware: crate::config::HardwareConfig::default(),
         query_classification: crate::config::QueryClassificationConfig::default(),

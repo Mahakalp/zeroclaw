@@ -2682,45 +2682,21 @@ pub async fn run(
                     );
                     (
                         Some(db_provider.name.clone()),
-                        db_provider
-                            .api_key
-                            .clone()
-                            .or_else(|| config.api_key.clone()),
-                        db_provider
-                            .api_url
-                            .clone()
-                            .or_else(|| config.api_url.clone()),
-                        db_provider
-                            .default_model
-                            .clone()
-                            .or_else(|| config.default_model.clone()),
+                        db_provider.api_key.clone(),
+                        db_provider.api_url.clone(),
+                        db_provider.default_model.clone(),
                     )
                 } else {
-                    tracing::warn!("No provider with is_default=true in DB, using config.toml");
-                    (
-                        config.default_provider.clone(),
-                        config.api_key.clone(),
-                        config.api_url.clone(),
-                        config.default_model.clone(),
-                    )
+                    tracing::warn!("No provider with is_default=true in DB, no fallback available");
+                    (None, None, None, None)
                 }
             } else {
-                tracing::warn!("Failed to get providers from DB, using config.toml");
-                (
-                    config.default_provider.clone(),
-                    config.api_key.clone(),
-                    config.api_url.clone(),
-                    config.default_model.clone(),
-                )
+                tracing::warn!("Failed to get providers from DB, no fallback available");
+                (None, None, None, None)
             }
         } else {
-            tracing::warn!("Config DB unavailable, using config.toml");
-            (
-                config.default_provider.clone(),
-                config.api_key.clone(),
-                config.api_url.clone(),
-                config.default_model.clone(),
-            )
+            tracing::warn!("Config DB unavailable, no fallback available");
+            (None, None, None, None)
         };
 
     // ── Wire up agnostic subsystems ──────────────────────────────
@@ -2759,6 +2735,8 @@ pub async fn run(
     } else {
         (None, None)
     };
+    let agents: std::collections::HashMap<String, crate::config::DelegateAgentConfig> =
+        std::collections::HashMap::new();
     let mut tools_registry = tools::all_tools_with_runtime(
         Arc::new(config.clone()),
         &security,
@@ -2769,7 +2747,7 @@ pub async fn run(
         &config.browser,
         &config.http_request,
         &config.workspace_dir,
-        &config.agents,
+        &agents,
         resolved_api_key.as_deref(),
         &config,
     );
@@ -2908,7 +2886,7 @@ pub async fn run(
         "model_routing_config",
         "Configure default model, scenario routing, and delegate agents. Use for natural-language requests like: 'set conversation to kimi and coding to gpt-5.3-codex'.",
     ));
-    if !config.agents.is_empty() {
+    if !agents.is_empty() {
         tool_descs.push((
             "delegate",
             "Delegate a sub-task to a specialized agent. Use when: task needs different model/capability, or to parallelize work.",
@@ -3202,54 +3180,38 @@ pub async fn run(
 pub async fn process_message(config: Config, message: &str) -> Result<String> {
     // ── Resolve provider from database (fallback to config.toml) ───────
     let config_db = crate::config::db::ConfigDatabase::new(&config.workspace_dir).ok();
-    let (resolved_provider, resolved_api_key, resolved_api_url, resolved_model) =
-        if let Some(ref db) = config_db {
-            if let Ok(providers) = db.get_providers("default") {
-                let default_provider = providers
-                    .iter()
-                    .filter(|p| p.is_default)
-                    .min_by_key(|p| p.priority);
+    let (
+        resolved_provider,
+        resolved_api_key,
+        resolved_api_url,
+        resolved_model,
+        resolved_temperature,
+    ) = if let Some(ref db) = config_db {
+        if let Ok(providers) = db.get_providers("default") {
+            let default_provider = providers
+                .iter()
+                .filter(|p| p.is_default)
+                .min_by_key(|p| p.priority);
 
-                if let Some(db_provider) = default_provider {
-                    (
-                        Some(db_provider.name.clone()),
-                        db_provider
-                            .api_key
-                            .clone()
-                            .or_else(|| config.api_key.clone()),
-                        db_provider
-                            .api_url
-                            .clone()
-                            .or_else(|| config.api_url.clone()),
-                        db_provider
-                            .default_model
-                            .clone()
-                            .or_else(|| config.default_model.clone()),
-                    )
-                } else {
-                    (
-                        config.default_provider.clone(),
-                        config.api_key.clone(),
-                        config.api_url.clone(),
-                        config.default_model.clone(),
-                    )
-                }
-            } else {
+            if let Some(db_provider) = default_provider {
                 (
-                    config.default_provider.clone(),
-                    config.api_key.clone(),
-                    config.api_url.clone(),
-                    config.default_model.clone(),
+                    Some(db_provider.name.clone()),
+                    db_provider.api_key.clone(),
+                    db_provider.api_url.clone(),
+                    db_provider.default_model.clone(),
+                    db_provider.temperature,
                 )
+            } else {
+                (None, None, None, None, None)
             }
         } else {
-            (
-                config.default_provider.clone(),
-                config.api_key.clone(),
-                config.api_url.clone(),
-                config.default_model.clone(),
-            )
-        };
+            (None, None, None, None, None)
+        }
+    } else {
+        (None, None, None, None, None)
+    };
+
+    let temperature = resolved_temperature.unwrap_or(0.7);
 
     let observer: Arc<dyn Observer> =
         Arc::from(observability::create_observer(&config.observability));
@@ -3274,6 +3236,8 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
     } else {
         (None, None)
     };
+    let agents: std::collections::HashMap<String, crate::config::DelegateAgentConfig> =
+        std::collections::HashMap::new();
     let mut tools_registry = tools::all_tools_with_runtime(
         Arc::new(config.clone()),
         &security,
@@ -3284,7 +3248,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         &config.browser,
         &config.http_request,
         &config.workspace_dir,
-        &config.agents,
+        &agents,
         resolved_api_key.as_deref(),
         &config,
     );
@@ -3420,7 +3384,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         observer.as_ref(),
         provider_name,
         &model_name,
-        config.default_temperature,
+        temperature,
         true,
         &config.multimodal,
         config.agent.max_tool_iterations,

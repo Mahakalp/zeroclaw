@@ -520,27 +520,21 @@ fn resolve_provider_alias(name: &str) -> Option<String> {
     None
 }
 
-fn resolved_default_provider(config: &Config) -> String {
-    config
-        .default_provider
-        .clone()
-        .unwrap_or_else(|| "openrouter".to_string())
+fn resolved_default_provider(_config: &Config) -> String {
+    "openrouter".to_string()
 }
 
-fn resolved_default_model(config: &Config) -> String {
-    config
-        .default_model
-        .clone()
-        .unwrap_or_else(|| "anthropic/claude-sonnet-4.6".to_string())
+fn resolved_default_model(_config: &Config) -> String {
+    "anthropic/claude-sonnet-4-20250514".to_string()
 }
 
 fn runtime_defaults_from_config(config: &Config) -> ChannelRuntimeDefaults {
     ChannelRuntimeDefaults {
-        default_provider: resolved_default_provider(config),
-        model: resolved_default_model(config),
-        temperature: config.default_temperature,
-        api_key: config.api_key.clone(),
-        api_url: config.api_url.clone(),
+        default_provider: "openrouter".to_string(),
+        model: "anthropic/claude-sonnet-4-20250514".to_string(),
+        temperature: 0.7,
+        api_key: None,
+        api_url: None,
         reliability: config.reliability.clone(),
     }
 }
@@ -605,11 +599,6 @@ async fn load_runtime_defaults_from_config_file(path: &Path) -> Result<ChannelRu
     let mut parsed: Config =
         toml::from_str(&contents).with_context(|| format!("Failed to parse {}", path.display()))?;
     parsed.config_path = path.to_path_buf();
-
-    if let Some(zeroclaw_dir) = path.parent() {
-        let store = crate::security::SecretStore::new(zeroclaw_dir, parsed.secrets.encrypt);
-        decrypt_optional_secret_for_runtime_reload(&store, &mut parsed.api_key, "config.api_key")?;
-    }
 
     parsed.apply_env_overrides();
     Ok(runtime_defaults_from_config(&parsed))
@@ -3222,8 +3211,8 @@ pub async fn start_channels(config: Config) -> Result<()> {
     let provider: Arc<dyn Provider> = Arc::from(
         create_resilient_provider_nonblocking(
             &provider_name,
-            config.api_key.clone(),
-            config.api_url.clone(),
+            None,
+            None,
             config.reliability.clone(),
             provider_runtime_options.clone(),
         )
@@ -3259,12 +3248,12 @@ pub async fn start_channels(config: Config) -> Result<()> {
         &config.workspace_dir,
     ));
     let model = resolved_default_model(&config);
-    let temperature = config.default_temperature;
+    let temperature = 0.7;
     let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
         &config.memory,
         Some(&config.storage.provider.config),
         &config.workspace_dir,
-        config.api_key.as_deref(),
+        None,
     )?);
     let (composio_key, composio_entity_id) = if config.composio.enabled {
         (
@@ -3274,6 +3263,8 @@ pub async fn start_channels(config: Config) -> Result<()> {
     } else {
         (None, None)
     };
+    let agents: std::collections::HashMap<String, crate::config::DelegateAgentConfig> =
+        std::collections::HashMap::new();
     // Build system prompt from workspace identity files + skills
     let workspace = config.workspace_dir.clone();
     let tools_registry = Arc::new(tools::all_tools_with_runtime(
@@ -3286,8 +3277,8 @@ pub async fn start_channels(config: Config) -> Result<()> {
         &config.browser,
         &config.http_request,
         &workspace,
-        &config.agents,
-        config.api_key.as_deref(),
+        &agents,
+        None,
         &config,
     ));
 
@@ -3341,7 +3332,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         "pushover",
         "Send a Pushover notification to your device. Requires PUSHOVER_TOKEN and PUSHOVER_USER_KEY in .env file.",
     ));
-    if !config.agents.is_empty() {
+    if !agents.is_empty() {
         tool_descs.push((
             "delegate",
             "Delegate a subtask to a specialized agent. Use when: a task benefits from a different model (e.g. fast summarization, deep reasoning, code generation). The sub-agent runs a single prompt and returns its response.",
@@ -3555,8 +3546,8 @@ pub async fn start_channels(config: Config) -> Result<()> {
         conversation_histories: Arc::new(Mutex::new(HashMap::new())),
         provider_cache: Arc::new(Mutex::new(provider_cache_seed)),
         route_overrides: Arc::new(Mutex::new(HashMap::new())),
-        api_key: config.api_key.clone(),
-        api_url: config.api_url.clone(),
+        api_key: None,
+        api_url: None,
         reliability: Arc::new(config.reliability.clone()),
         provider_runtime_options,
         workspace_dir: Arc::new(config.workspace_dir.clone()),
