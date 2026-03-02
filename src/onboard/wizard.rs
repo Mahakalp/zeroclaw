@@ -1,12 +1,13 @@
+use crate::config::db::{Agent, Provider};
 use crate::config::schema::{
     default_nostr_relays, DingTalkConfig, IrcConfig, LarkReceiveMode, LinqConfig,
     NextcloudTalkConfig, NostrConfig, QQConfig, SignalConfig, StreamMode, WhatsAppConfig,
 };
 use crate::config::{
-    AutonomyConfig, BrowserConfig, ChannelsConfig, ComposioConfig, Config, DiscordConfig,
-    FeishuConfig, HeartbeatConfig, IMessageConfig, LarkConfig, MatrixConfig, MemoryConfig,
-    ObservabilityConfig, RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig, TelegramConfig,
-    WebhookConfig,
+    AutonomyConfig, BrowserConfig, ChannelsConfig, ComposioConfig, Config, ConfigDatabase,
+    DiscordConfig, FeishuConfig, HeartbeatConfig, IMessageConfig, LarkConfig, MatrixConfig,
+    MemoryConfig, ObservabilityConfig, RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig,
+    TelegramConfig, WebhookConfig,
 };
 use crate::hardware::{self, HardwareConfig};
 use crate::memory::{
@@ -18,6 +19,7 @@ use crate::providers::{
     is_zai_cn_alias,
 };
 use anyhow::{bail, Context, Result};
+use chrono::Utc;
 use console::style;
 use dialoguer::{Confirm, Input, Select};
 use serde::{Deserialize, Serialize};
@@ -27,6 +29,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs;
+use uuid::Uuid;
 
 // ── Project context collected during wizard ──────────────────────
 
@@ -176,6 +179,19 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
 
     config.save().await?;
     persist_workspace_selection(&config.config_path).await?;
+
+    if let Err(e) = save_provider_and_agent_to_db(
+        &workspace_dir,
+        &provider,
+        Some(&api_key),
+        provider_api_url.as_deref(),
+        &model,
+        &project_ctx.agent_name,
+    )
+    .await
+    {
+        tracing::warn!("Failed to save provider and agent to database: {}", e);
+    }
 
     // ── Final summary ────────────────────────────────────────────
     print_summary(&config);
@@ -5496,6 +5512,128 @@ fn print_summary(config: &Config) {
         style("Happy hacking! 🦀").white().bold()
     );
     println!();
+}
+
+async fn save_provider_and_agent_to_db(
+    workspace_dir: &Path,
+    provider_name: &str,
+    api_key: Option<&str>,
+    api_url: Option<&str>,
+    default_model: &str,
+    agent_name: &str,
+) -> Result<()> {
+    let db = ConfigDatabase::new(&workspace_dir.to_path_buf())?;
+
+    let now = Utc::now().to_rfc3339();
+    let provider = Provider {
+        id: Uuid::new_v4().to_string(),
+        profile_id: "default".to_string(),
+        name: provider_name.to_string(),
+        api_key: api_key.filter(|k| !k.trim().is_empty()).map(String::from),
+        api_url: api_url.map(String::from),
+        default_model: Some(default_model.to_string()),
+        temperature: Some(0.7),
+        is_enabled: true,
+        is_default: true,
+        priority: 0,
+        metadata: None,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    db.create_provider(&provider)?;
+
+    let default_system_prompt =
+        "You are ZeroClaw, an AI assistant powered by ZeroClaw. Be warm, natural, and clear.";
+
+    let agent = Agent {
+        id: Uuid::new_v4().to_string(),
+        profile_id: "default".to_string(),
+        name: agent_name.to_string(),
+        provider: provider_name.to_string(),
+        model: Some(default_model.to_string()),
+        api_key: api_key.filter(|k| !k.trim().is_empty()).map(String::from),
+        api_url: api_url.map(String::from),
+        system_prompt: Some(default_system_prompt.to_string()),
+        temperature: Some(0.7),
+        max_depth: Some(5),
+        agentic: true,
+        allowed_tools: None,
+        max_iterations: Some(100),
+        metadata: None,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    db.create_agent(&agent)?;
+
+    Ok(())
+}
+
+async fn update_provider_and_agent_in_db(
+    workspace_dir: &Path,
+    provider_name: &str,
+    api_key: Option<&str>,
+    api_url: Option<&str>,
+    default_model: &str,
+) -> Result<()> {
+    let db = ConfigDatabase::new(&workspace_dir.to_path_buf())?;
+
+    if let Some(existing_provider) = db.get_default_provider("default")? {
+        let now = Utc::now().to_rfc3339();
+        let updated_provider = Provider {
+            id: existing_provider.id,
+            profile_id: "default".to_string(),
+            name: provider_name.to_string(),
+            api_key: api_key.filter(|k| !k.trim().is_empty()).map(String::from),
+            api_url: api_url.map(String::from),
+            default_model: Some(default_model.to_string()),
+            temperature: Some(0.7),
+            is_enabled: true,
+            is_default: true,
+            priority: 0,
+            metadata: None,
+            created_at: existing_provider.created_at,
+            updated_at: now,
+        };
+        db.update_provider(&updated_provider)?;
+
+        let agents = db.get_agents("default")?;
+        if let Some(existing_agent) = agents.first() {
+            let now = Utc::now().to_rfc3339();
+            let updated_agent = Agent {
+                id: existing_agent.id.clone(),
+                profile_id: "default".to_string(),
+                name: existing_agent.name.clone(),
+                provider: provider_name.to_string(),
+                model: Some(default_model.to_string()),
+                api_key: api_key.filter(|k| !k.trim().is_empty()).map(String::from),
+                api_url: api_url.map(String::from),
+                system_prompt: existing_agent.system_prompt.clone(),
+                temperature: Some(0.7),
+                max_depth: Some(5),
+                agentic: true,
+                allowed_tools: existing_agent.allowed_tools.clone(),
+                max_iterations: Some(100),
+                metadata: existing_agent.metadata.clone(),
+                created_at: existing_agent.created_at.clone(),
+                updated_at: now,
+            };
+            db.update_agent(&updated_agent)?;
+        }
+    } else {
+        save_provider_and_agent_to_db(
+            workspace_dir,
+            provider_name,
+            api_key,
+            api_url,
+            default_model,
+            "ZeroClaw",
+        )
+        .await?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
