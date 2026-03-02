@@ -1244,6 +1244,7 @@ pub struct ProviderCreate {
     api_key: Option<String>,
     api_url: Option<String>,
     default_model: Option<String>,
+    temperature: Option<f64>,
     is_enabled: Option<bool>,
     is_default: Option<bool>,
 }
@@ -1325,6 +1326,7 @@ pub async fn handle_api_providers_create(
             api_key: payload.api_key,
             api_url: payload.api_url,
             default_model: payload.default_model,
+            temperature: payload.temperature,
             is_enabled: payload.is_enabled.unwrap_or(true),
             is_default: payload.is_default.unwrap_or(false),
             priority: 0,
@@ -1372,6 +1374,7 @@ pub async fn handle_api_providers_update(
                 api_key: payload.api_key.or(existing.api_key),
                 api_url: payload.api_url.or(existing.api_url),
                 default_model: payload.default_model.or(existing.default_model),
+                temperature: payload.temperature.or(existing.temperature),
                 is_enabled: payload.is_enabled.unwrap_or(existing.is_enabled),
                 is_default: payload.is_default.unwrap_or(existing.is_default),
                 priority: existing.priority,

@@ -22,6 +22,7 @@ pub struct Provider {
     pub api_key: Option<String>,
     pub api_url: Option<String>,
     pub default_model: Option<String>,
+    pub temperature: Option<f64>,
     pub is_enabled: bool,
     pub is_default: bool,
     pub priority: i32,
@@ -48,6 +49,26 @@ pub struct ConfigHistory {
     pub config_snapshot: String,
     pub change_description: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Agent {
+    pub id: String,
+    pub profile_id: String,
+    pub name: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub api_key: Option<String>,
+    pub api_url: Option<String>,
+    pub system_prompt: Option<String>,
+    pub temperature: Option<f64>,
+    pub max_depth: Option<i32>,
+    pub agentic: bool,
+    pub allowed_tools: Option<String>,
+    pub max_iterations: Option<i32>,
+    pub metadata: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 pub struct ConfigDatabase {
@@ -112,9 +133,31 @@ impl ConfigDatabase {
                 api_key TEXT,
                 api_url TEXT,
                 default_model TEXT,
+                temperature REAL,
                 is_enabled BOOLEAN DEFAULT TRUE,
                 is_default BOOLEAN DEFAULT FALSE,
                 priority INTEGER DEFAULT 0,
+                metadata TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(profile_id, name)
+            );
+            
+            -- Agents
+            CREATE TABLE IF NOT EXISTS agents (
+                id TEXT PRIMARY KEY,
+                profile_id TEXT REFERENCES profiles(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT,
+                api_key TEXT,
+                api_url TEXT,
+                system_prompt TEXT,
+                temperature REAL,
+                max_depth INTEGER,
+                agentic BOOLEAN DEFAULT FALSE,
+                allowed_tools TEXT,
+                max_iterations INTEGER,
                 metadata TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -149,6 +192,7 @@ impl ConfigDatabase {
             CREATE INDEX IF NOT EXISTS idx_channels_profile ON channels(profile_id);
             CREATE INDEX IF NOT EXISTS idx_channels_type ON channels(channel_type);
             CREATE INDEX IF NOT EXISTS idx_history_profile ON config_history(profile_id);
+            CREATE INDEX IF NOT EXISTS idx_agents_profile ON agents(profile_id);
             "#,
         )?;
 
@@ -281,8 +325,8 @@ impl ConfigDatabase {
     pub fn create_provider(&self, provider: &Provider) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO providers (id, profile_id, name, api_key, api_url, default_model, is_enabled, is_default, priority, metadata, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO providers (id, profile_id, name, api_key, api_url, default_model, temperature, is_enabled, is_default, priority, metadata, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 provider.id,
                 provider.profile_id,
@@ -290,6 +334,7 @@ impl ConfigDatabase {
                 provider.api_key,
                 provider.api_url,
                 provider.default_model,
+                provider.temperature,
                 provider.is_enabled,
                 provider.is_default,
                 provider.priority,
@@ -304,7 +349,7 @@ impl ConfigDatabase {
     pub fn get_providers(&self, profile_id: &str) -> Result<Vec<Provider>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, profile_id, name, api_key, api_url, default_model, is_enabled, is_default, priority, metadata, created_at, updated_at 
+            "SELECT id, profile_id, name, api_key, api_url, default_model, temperature, is_enabled, is_default, priority, metadata, created_at, updated_at 
              FROM providers WHERE profile_id = ?1 ORDER BY priority"
         )?;
 
@@ -317,12 +362,13 @@ impl ConfigDatabase {
                     api_key: row.get(3)?,
                     api_url: row.get(4)?,
                     default_model: row.get(5)?,
-                    is_enabled: row.get(6)?,
-                    is_default: row.get(7)?,
-                    priority: row.get(8)?,
-                    metadata: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
+                    temperature: row.get(6)?,
+                    is_enabled: row.get(7)?,
+                    is_default: row.get(8)?,
+                    priority: row.get(9)?,
+                    metadata: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
                 })
             })?
             .collect::<SqliteResult<Vec<_>>>()?;
@@ -333,7 +379,7 @@ impl ConfigDatabase {
     pub fn get_provider(&self, id: &str) -> Result<Option<Provider>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, profile_id, name, api_key, api_url, default_model, is_enabled, is_default, priority, metadata, created_at, updated_at 
+            "SELECT id, profile_id, name, api_key, api_url, default_model, temperature, is_enabled, is_default, priority, metadata, created_at, updated_at 
              FROM providers WHERE id = ?1"
         )?;
 
@@ -346,12 +392,13 @@ impl ConfigDatabase {
                     api_key: row.get(3)?,
                     api_url: row.get(4)?,
                     default_model: row.get(5)?,
-                    is_enabled: row.get(6)?,
-                    is_default: row.get(7)?,
-                    priority: row.get(8)?,
-                    metadata: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
+                    temperature: row.get(6)?,
+                    is_enabled: row.get(7)?,
+                    is_default: row.get(8)?,
+                    priority: row.get(9)?,
+                    metadata: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
                 })
             })
             .optional()?;
@@ -362,7 +409,7 @@ impl ConfigDatabase {
     pub fn get_default_provider(&self, profile_id: &str) -> Result<Option<Provider>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, profile_id, name, api_key, api_url, default_model, is_enabled, is_default, priority, metadata, created_at, updated_at 
+            "SELECT id, profile_id, name, api_key, api_url, default_model, temperature, is_enabled, is_default, priority, metadata, created_at, updated_at 
              FROM providers WHERE profile_id = ?1 AND is_default = TRUE"
         )?;
 
@@ -375,12 +422,13 @@ impl ConfigDatabase {
                     api_key: row.get(3)?,
                     api_url: row.get(4)?,
                     default_model: row.get(5)?,
-                    is_enabled: row.get(6)?,
-                    is_default: row.get(7)?,
-                    priority: row.get(8)?,
-                    metadata: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
+                    temperature: row.get(6)?,
+                    is_enabled: row.get(7)?,
+                    is_default: row.get(8)?,
+                    priority: row.get(9)?,
+                    metadata: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
                 })
             })
             .optional()?;
@@ -391,8 +439,8 @@ impl ConfigDatabase {
     pub fn update_provider(&self, provider: &Provider) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE providers SET name = ?2, api_key = ?3, api_url = ?4, default_model = ?5, 
-             is_enabled = ?6, is_default = ?7, priority = ?8, metadata = ?9, updated_at = CURRENT_TIMESTAMP 
+            "UPDATE providers SET name = ?2, api_key = ?3, api_url = ?4, default_model = ?5, temperature = ?6,
+             is_enabled = ?7, is_default = ?8, priority = ?9, metadata = ?10, updated_at = CURRENT_TIMESTAMP 
              WHERE id = ?1",
             params![
                 provider.id,
@@ -400,6 +448,7 @@ impl ConfigDatabase {
                 provider.api_key,
                 provider.api_url,
                 provider.default_model,
+                provider.temperature,
                 provider.is_enabled,
                 provider.is_default,
                 provider.priority,
@@ -529,6 +578,131 @@ impl ConfigDatabase {
     pub fn delete_channel(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM channels WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    // ==================== Agents ====================
+
+    pub fn create_agent(&self, agent: &Agent) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO agents (id, profile_id, name, provider, model, api_key, api_url, system_prompt, temperature, max_depth, agentic, allowed_tools, max_iterations, metadata, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            params![
+                agent.id,
+                agent.profile_id,
+                agent.name,
+                agent.provider,
+                agent.model,
+                agent.api_key,
+                agent.api_url,
+                agent.system_prompt,
+                agent.temperature,
+                agent.max_depth,
+                agent.agentic,
+                agent.allowed_tools,
+                agent.max_iterations,
+                agent.metadata,
+                agent.created_at,
+                agent.updated_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_agents(&self, profile_id: &str) -> Result<Vec<Agent>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, profile_id, name, provider, model, api_key, api_url, system_prompt, temperature, max_depth, agentic, allowed_tools, max_iterations, metadata, created_at, updated_at 
+             FROM agents WHERE profile_id = ?1 ORDER BY name"
+        )?;
+
+        let agents = stmt
+            .query_map([profile_id], |row| {
+                Ok(Agent {
+                    id: row.get(0)?,
+                    profile_id: row.get(1)?,
+                    name: row.get(2)?,
+                    provider: row.get(3)?,
+                    model: row.get(4)?,
+                    api_key: row.get(5)?,
+                    api_url: row.get(6)?,
+                    system_prompt: row.get(7)?,
+                    temperature: row.get(8)?,
+                    max_depth: row.get(9)?,
+                    agentic: row.get(10)?,
+                    allowed_tools: row.get(11)?,
+                    max_iterations: row.get(12)?,
+                    metadata: row.get(13)?,
+                    created_at: row.get(14)?,
+                    updated_at: row.get(15)?,
+                })
+            })?
+            .collect::<SqliteResult<Vec<_>>>()?;
+
+        Ok(agents)
+    }
+
+    pub fn get_agent(&self, id: &str) -> Result<Option<Agent>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, profile_id, name, provider, model, api_key, api_url, system_prompt, temperature, max_depth, agentic, allowed_tools, max_iterations, metadata, created_at, updated_at 
+             FROM agents WHERE id = ?1"
+        )?;
+
+        let agent = stmt
+            .query_row([id], |row| {
+                Ok(Agent {
+                    id: row.get(0)?,
+                    profile_id: row.get(1)?,
+                    name: row.get(2)?,
+                    provider: row.get(3)?,
+                    model: row.get(4)?,
+                    api_key: row.get(5)?,
+                    api_url: row.get(6)?,
+                    system_prompt: row.get(7)?,
+                    temperature: row.get(8)?,
+                    max_depth: row.get(9)?,
+                    agentic: row.get(10)?,
+                    allowed_tools: row.get(11)?,
+                    max_iterations: row.get(12)?,
+                    metadata: row.get(13)?,
+                    created_at: row.get(14)?,
+                    updated_at: row.get(15)?,
+                })
+            })
+            .optional()?;
+
+        Ok(agent)
+    }
+
+    pub fn update_agent(&self, agent: &Agent) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE agents SET name = ?2, provider = ?3, model = ?4, api_key = ?5, api_url = ?6, system_prompt = ?7, temperature = ?8, max_depth = ?9, agentic = ?10, allowed_tools = ?11, max_iterations = ?12, metadata = ?13, updated_at = CURRENT_TIMESTAMP 
+             WHERE id = ?1",
+            params![
+                agent.id,
+                agent.name,
+                agent.provider,
+                agent.model,
+                agent.api_key,
+                agent.api_url,
+                agent.system_prompt,
+                agent.temperature,
+                agent.max_depth,
+                agent.agentic,
+                agent.allowed_tools,
+                agent.max_iterations,
+                agent.metadata
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_agent(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM agents WHERE id = ?1", [id])?;
         Ok(())
     }
 
