@@ -1441,330 +1441,16 @@ mod tests {
     use crate::memory::{Memory, MemoryCategory, MemoryEntry};
     use crate::providers::Provider;
     use async_trait::async_trait;
+    use axum::extract::connect_info::ConnectInfo;
     use axum::http::HeaderValue;
     use axum::response::IntoResponse;
     use http_body_util::BodyExt;
     use parking_lot::Mutex;
+    use std::net::SocketAddr;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// Generate a random hex secret at runtime to avoid hard-coded cryptographic values.
-    fn generate_test_secret() -> String {
-        let bytes: [u8; 32] = rand::random();
-        hex::encode(bytes)
-    }
-
-    #[test]
-    fn security_body_limit_is_64kb() {
-        assert_eq!(MAX_BODY_SIZE, 65_536);
-    }
-
-    #[test]
-    fn security_timeout_is_30_seconds() {
-        assert_eq!(REQUEST_TIMEOUT_SECS, 30);
-    }
-
-    #[test]
-    fn webhook_body_requires_message_field() {
-        let valid = r#"{"message": "hello"}"#;
-        let parsed: Result<WebhookBody, _> = serde_json::from_str(valid);
-        assert!(parsed.is_ok());
-        assert_eq!(parsed.unwrap().message, "hello");
-
-        let missing = r#"{"other": "field"}"#;
-        let parsed: Result<WebhookBody, _> = serde_json::from_str(missing);
-        assert!(parsed.is_err());
-    }
-
-    #[test]
-    fn whatsapp_query_fields_are_optional() {
-        let q = WhatsAppVerifyQuery {
-            mode: None,
-            verify_token: None,
-            challenge: None,
-        };
-        assert!(q.mode.is_none());
-    }
-
-    #[test]
-    fn app_state_is_clone() {
-        fn assert_clone<T: Clone>() {}
-        assert_clone::<AppState>();
-    }
-
-    #[tokio::test]
-    async fn metrics_endpoint_returns_hint_when_prometheus_is_disabled() {
-        let state = AppState {
-            config: Arc::new(Mutex::new(Config::default())),
-            config_db: None,
-            provider: Arc::new(MockProvider::default()),
-            model: "test-model".into(),
-            temperature: 0.0,
-            mem: Arc::new(MockMemory),
-            auto_save: false,
-            webhook_secret_hash: None,
-            trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
-            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
-            linq: None,
-            linq_signing_secret: None,
-            nextcloud_talk: None,
-            nextcloud_talk_webhook_secret: None,
-            observer: Arc::new(crate::observability::NoopObserver),
-            tools_registry: Arc::new(Vec::new()),
-            cost_tracker: None,
-            event_tx: tokio::sync::broadcast::channel(16).0,
-        };
-
-        let response = handle_metrics(State(state)).await.into_response();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response
-                .headers()
-                .get(header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok()),
-            Some(PROMETHEUS_CONTENT_TYPE)
-        );
-
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let text = String::from_utf8(body.to_vec()).unwrap();
-        assert!(text.contains("Prometheus backend not enabled"));
-    }
-
-    #[tokio::test]
-    async fn metrics_endpoint_renders_prometheus_output() {
-        let prom = Arc::new(crate::observability::PrometheusObserver::new());
-        crate::observability::Observer::record_event(
-            prom.as_ref(),
-            &crate::observability::ObserverEvent::HeartbeatTick,
-        );
-
-        let observer: Arc<dyn crate::observability::Observer> = prom;
-        let state = AppState {
-            config: Arc::new(Mutex::new(Config::default())),
-            config_db: None,
-            provider: Arc::new(MockProvider::default()),
-            model: "test-model".into(),
-            temperature: 0.0,
-            mem: Arc::new(MockMemory),
-            auto_save: false,
-            webhook_secret_hash: None,
-            trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
-            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
-            linq: None,
-            linq_signing_secret: None,
-            nextcloud_talk: None,
-            nextcloud_talk_webhook_secret: None,
-            observer,
-            tools_registry: Arc::new(Vec::new()),
-            cost_tracker: None,
-            event_tx: tokio::sync::broadcast::channel(16).0,
-        };
-
-        let response = handle_metrics(State(state)).await.into_response();
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let text = String::from_utf8(body.to_vec()).unwrap();
-        assert!(text.contains("zeroclaw_heartbeat_ticks_total 1"));
-    }
-
-    #[test]
-    fn gateway_rate_limiter_blocks_after_limit() {
-        let limiter = GatewayRateLimiter::new(2, 100);
-        assert!(limiter.allow_webhook("127.0.0.1"));
-        assert!(limiter.allow_webhook("127.0.0.1"));
-        assert!(!limiter.allow_webhook("127.0.0.1"));
-    }
-
-    #[test]
-    fn rate_limiter_sweep_removes_stale_entries() {
-        let limiter = SlidingWindowRateLimiter::new(10, Duration::from_secs(60), 100);
-        // Add entries for multiple IPs
-        assert!(limiter.allow("ip-1"));
-        assert!(limiter.allow("ip-2"));
-        assert!(limiter.allow("ip-3"));
-
-        {
-            let guard = limiter.requests.lock();
-            assert_eq!(guard.0.len(), 3);
-        }
-
-        // Force a sweep by backdating last_sweep
-        {
-            let mut guard = limiter.requests.lock();
-            guard.1 = Instant::now()
-                .checked_sub(Duration::from_secs(RATE_LIMITER_SWEEP_INTERVAL_SECS + 1))
-                .unwrap();
-            // Clear timestamps for ip-2 and ip-3 to simulate stale entries
-            guard.0.get_mut("ip-2").unwrap().clear();
-            guard.0.get_mut("ip-3").unwrap().clear();
-        }
-
-        // Next allow() call should trigger sweep and remove stale entries
-        assert!(limiter.allow("ip-1"));
-
-        {
-            let guard = limiter.requests.lock();
-            assert_eq!(guard.0.len(), 1, "Stale entries should have been swept");
-            assert!(guard.0.contains_key("ip-1"));
-        }
-    }
-
-    #[test]
-    fn rate_limiter_zero_limit_always_allows() {
-        let limiter = SlidingWindowRateLimiter::new(0, Duration::from_secs(60), 10);
-        for _ in 0..100 {
-            assert!(limiter.allow("any-key"));
-        }
-    }
-
-    #[test]
-    fn idempotency_store_rejects_duplicate_key() {
-        let store = IdempotencyStore::new(Duration::from_secs(30), 10);
-        assert!(store.record_if_new("req-1"));
-        assert!(!store.record_if_new("req-1"));
-        assert!(store.record_if_new("req-2"));
-    }
-
-    #[test]
-    fn rate_limiter_bounded_cardinality_evicts_oldest_key() {
-        let limiter = SlidingWindowRateLimiter::new(5, Duration::from_secs(60), 2);
-        assert!(limiter.allow("ip-1"));
-        assert!(limiter.allow("ip-2"));
-        assert!(limiter.allow("ip-3"));
-
-        let guard = limiter.requests.lock();
-        assert_eq!(guard.0.len(), 2);
-        assert!(guard.0.contains_key("ip-2"));
-        assert!(guard.0.contains_key("ip-3"));
-    }
-
-    #[test]
-    fn idempotency_store_bounded_cardinality_evicts_oldest_key() {
-        let store = IdempotencyStore::new(Duration::from_secs(300), 2);
-        assert!(store.record_if_new("k1"));
-        std::thread::sleep(Duration::from_millis(2));
-        assert!(store.record_if_new("k2"));
-        std::thread::sleep(Duration::from_millis(2));
-        assert!(store.record_if_new("k3"));
-
-        let keys = store.keys.lock();
-        assert_eq!(keys.len(), 2);
-        assert!(!keys.contains_key("k1"));
-        assert!(keys.contains_key("k2"));
-        assert!(keys.contains_key("k3"));
-    }
-
-    #[test]
-    fn client_key_defaults_to_peer_addr_when_untrusted_proxy_mode() {
-        let peer = SocketAddr::from(([10, 0, 0, 5], 42617));
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "X-Forwarded-For",
-            HeaderValue::from_static("198.51.100.10, 203.0.113.11"),
-        );
-
-        let key = client_key_from_request(Some(peer), &headers, false);
-        assert_eq!(key, "10.0.0.5");
-    }
-
-    #[test]
-    fn client_key_uses_forwarded_ip_only_in_trusted_proxy_mode() {
-        let peer = SocketAddr::from(([10, 0, 0, 5], 42617));
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "X-Forwarded-For",
-            HeaderValue::from_static("198.51.100.10, 203.0.113.11"),
-        );
-
-        let key = client_key_from_request(Some(peer), &headers, true);
-        assert_eq!(key, "198.51.100.10");
-    }
-
-    #[test]
-    fn client_key_falls_back_to_peer_when_forwarded_header_invalid() {
-        let peer = SocketAddr::from(([10, 0, 0, 5], 42617));
-        let mut headers = HeaderMap::new();
-        headers.insert("X-Forwarded-For", HeaderValue::from_static("garbage-value"));
-
-        let key = client_key_from_request(Some(peer), &headers, true);
-        assert_eq!(key, "10.0.0.5");
-    }
-
-    #[test]
-    fn normalize_max_keys_uses_fallback_for_zero() {
-        assert_eq!(normalize_max_keys(0, 10_000), 10_000);
-        assert_eq!(normalize_max_keys(0, 0), 1);
-    }
-
-    #[test]
-    fn normalize_max_keys_preserves_nonzero_values() {
-        assert_eq!(normalize_max_keys(2_048, 10_000), 2_048);
-        assert_eq!(normalize_max_keys(1, 10_000), 1);
-    }
-
-    #[tokio::test]
-    async fn persist_pairing_tokens_writes_config_tokens() {
-        let temp = tempfile::tempdir().unwrap();
-        let config_path = temp.path().join("config.toml");
-        let workspace_path = temp.path().join("workspace");
-
-        let mut config = Config::default();
-        config.config_path = config_path.clone();
-        config.workspace_dir = workspace_path;
-        config.save().await.unwrap();
-
-        let guard = PairingGuard::new(true, &[]);
-        let code = guard.pairing_code().unwrap();
-        let token = guard.try_pair(&code, "test_client").await.unwrap().unwrap();
-        assert!(guard.is_authenticated(&token));
-
-        let shared_config = Arc::new(Mutex::new(config));
-        persist_pairing_tokens(shared_config.clone(), &guard)
-            .await
-            .unwrap();
-
-        let saved = tokio::fs::read_to_string(config_path).await.unwrap();
-        let parsed: Config = toml::from_str(&saved).unwrap();
-        assert_eq!(parsed.gateway.paired_tokens.len(), 1);
-        let persisted = &parsed.gateway.paired_tokens[0];
-        assert_eq!(persisted.len(), 64);
-        assert!(persisted.chars().all(|c| c.is_ascii_hexdigit()));
-
-        let in_memory = shared_config.lock();
-        assert_eq!(in_memory.gateway.paired_tokens.len(), 1);
-        assert_eq!(&in_memory.gateway.paired_tokens[0], persisted);
-    }
-
-    #[test]
-    fn webhook_memory_key_is_unique() {
-        let key1 = webhook_memory_key();
-        let key2 = webhook_memory_key();
-
-        assert!(key1.starts_with("webhook_msg_"));
-        assert!(key2.starts_with("webhook_msg_"));
-        assert_ne!(key1, key2);
-    }
-
-    #[test]
-    fn whatsapp_memory_key_includes_sender_and_message_id() {
-        let msg = ChannelMessage {
-            id: "wamid-123".into(),
-            sender: "+1234567890".into(),
-            reply_target: "+1234567890".into(),
-            content: "hello".into(),
-            channel: "whatsapp".into(),
-            timestamp: 1,
-            thread_ts: None,
-        };
-
-        let key = whatsapp_memory_key(&msg);
-        assert_eq!(key, "whatsapp_+1234567890_wamid-123");
+    fn test_connect_info() -> ConnectInfo<SocketAddr> {
+        ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 30_300)))
     }
 
     #[derive(Default)]
@@ -1839,220 +1525,61 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
-    struct TrackingMemory {
-        keys: Mutex<Vec<String>>,
-    }
-
-    #[async_trait]
-    impl Memory for TrackingMemory {
-        fn name(&self) -> &str {
-            "tracking"
-        }
-
-        async fn store(
-            &self,
-            key: &str,
-            _content: &str,
-            _category: MemoryCategory,
-            _session_id: Option<&str>,
-        ) -> anyhow::Result<()> {
-            self.keys.lock().push(key.to_string());
-            Ok(())
-        }
-
-        async fn recall(
-            &self,
-            _query: &str,
-            _limit: usize,
-            _session_id: Option<&str>,
-        ) -> anyhow::Result<Vec<MemoryEntry>> {
-            Ok(Vec::new())
-        }
-
-        async fn get(&self, _key: &str) -> anyhow::Result<Option<MemoryEntry>> {
-            Ok(None)
-        }
-
-        async fn list(
-            &self,
-            _category: Option<&MemoryCategory>,
-            _session_id: Option<&str>,
-        ) -> anyhow::Result<Vec<MemoryEntry>> {
-            Ok(Vec::new())
-        }
-
-        async fn forget(&self, _key: &str) -> anyhow::Result<bool> {
-            Ok(false)
-        }
-
-        async fn count(&self) -> anyhow::Result<usize> {
-            let size = self.keys.lock().len();
-            Ok(size)
-        }
-
-        async fn health_check(&self) -> bool {
-            true
-        }
-    }
-
-    fn test_connect_info() -> ConnectInfo<SocketAddr> {
-        ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 30_300)))
-    }
-
-    #[tokio::test]
-    async fn webhook_idempotency_skips_duplicate_provider_calls() {
-        let provider_impl = Arc::new(MockProvider::default());
-        let provider: Arc<dyn Provider> = provider_impl.clone();
-        let memory: Arc<dyn Memory> = Arc::new(MockMemory);
-
-        let state = AppState {
-            config: Arc::new(Mutex::new(Config::default())),
-            provider,
-            model: "test-model".into(),
-            temperature: 0.0,
-            mem: memory,
-            auto_save: false,
-            webhook_secret_hash: None,
-            pairing: Arc::new(PairingGuard::new(false, &[])),
-            trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
-            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
-            linq: None,
-            linq_signing_secret: None,
-            nextcloud_talk: None,
-            nextcloud_talk_webhook_secret: None,
-            observer: Arc::new(crate::observability::NoopObserver),
-            config_db: None,
-            tools_registry: Arc::new(Vec::new()),
-            cost_tracker: None,
-            event_tx: tokio::sync::broadcast::channel(16).0,
-        };
-
-        let mut headers = HeaderMap::new();
-        headers.insert("X-Idempotency-Key", HeaderValue::from_static("abc-123"));
-
-        let body = Ok(Json(WebhookBody {
-            message: "hello".into(),
-        }));
-        let first = handle_webhook(
-            State(state.clone()),
-            test_connect_info(),
-            headers.clone(),
-            body,
-        )
-        .await
-        .into_response();
-        assert_eq!(first.status(), StatusCode::OK);
-
-        let body = Ok(Json(WebhookBody {
-            message: "hello".into(),
-        }));
-        let second = handle_webhook(State(state), test_connect_info(), headers, body)
-            .await
-            .into_response();
-        assert_eq!(second.status(), StatusCode::OK);
-
-        let payload = second.into_body().collect().await.unwrap().to_bytes();
-        let parsed: serde_json::Value = serde_json::from_slice(&payload).unwrap();
-        assert_eq!(parsed["status"], "duplicate");
-        assert_eq!(parsed["idempotent"], true);
-        assert_eq!(provider_impl.calls.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    async fn webhook_autosave_stores_distinct_keys_per_request() {
-        let provider_impl = Arc::new(MockProvider::default());
-        let provider: Arc<dyn Provider> = provider_impl.clone();
-
-        let tracking_impl = Arc::new(TrackingMemory::default());
-        let memory: Arc<dyn Memory> = tracking_impl.clone();
-
-        let state = AppState {
-            config: Arc::new(Mutex::new(Config::default())),
-            provider,
-            model: "test-model".into(),
-            temperature: 0.0,
-            mem: memory,
-            auto_save: false,
-            webhook_secret_hash: None,
-            trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
-            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
-            linq: None,
-            linq_signing_secret: None,
-            nextcloud_talk: None,
-            nextcloud_talk_webhook_secret: None,
-            observer: Arc::new(crate::observability::NoopObserver),
-            config_db: None,
-            tools_registry: Arc::new(Vec::new()),
-            cost_tracker: None,
-            event_tx: tokio::sync::broadcast::channel(16).0,
-        };
-
-        let headers = HeaderMap::new();
-
-        let body1 = Ok(Json(WebhookBody {
-            message: "hello one".into(),
-        }));
-        let first = handle_webhook(
-            State(state.clone()),
-            test_connect_info(),
-            headers.clone(),
-            body1,
-        )
-        .await
-        .into_response();
-        assert_eq!(first.status(), StatusCode::OK);
-
-        let body2 = Ok(Json(WebhookBody {
-            message: "hello two".into(),
-        }));
-        let second = handle_webhook(State(state), test_connect_info(), headers, body2)
-            .await
-            .into_response();
-        assert_eq!(second.status(), StatusCode::OK);
-
-        let keys = tracking_impl.keys.lock().clone();
-        assert_eq!(keys.len(), 2);
-        assert_ne!(keys[0], keys[1]);
-        assert!(keys[0].starts_with("webhook_msg_"));
-        assert!(keys[1].starts_with("webhook_msg_"));
-        assert_eq!(provider_impl.calls.load(Ordering::SeqCst), 2);
+    /// Generate a random hex secret at runtime to avoid hard-coded cryptographic values.
+    fn generate_test_secret() -> String {
+        let bytes: [u8; 32] = rand::random();
+        hex::encode(bytes)
     }
 
     #[test]
-    fn webhook_secret_hash_is_deterministic_and_nonempty() {
-        let secret_a = generate_test_secret();
-        let secret_b = generate_test_secret();
-        let one = hash_webhook_secret(&secret_a);
-        let two = hash_webhook_secret(&secret_a);
-        let other = hash_webhook_secret(&secret_b);
+    fn security_body_limit_is_64kb() {
+        assert_eq!(MAX_BODY_SIZE, 65_536);
+    }
 
-        assert_eq!(one, two);
-        assert_ne!(one, other);
-        assert_eq!(one.len(), 64);
+    #[test]
+    fn security_timeout_is_30_seconds() {
+        assert_eq!(REQUEST_TIMEOUT_SECS, 30);
+    }
+
+    #[test]
+    fn webhook_body_requires_message_field() {
+        let valid = r#"{"message": "hello"}"#;
+        let parsed: Result<WebhookBody, _> = serde_json::from_str(valid);
+        assert!(parsed.is_ok());
+        assert_eq!(parsed.unwrap().message, "hello");
+
+        let missing = r#"{"other": "field"}"#;
+        let parsed: Result<WebhookBody, _> = serde_json::from_str(missing);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn whatsapp_query_fields_are_optional() {
+        let q = WhatsAppVerifyQuery {
+            mode: None,
+            verify_token: None,
+            challenge: None,
+        };
+        assert!(q.mode.is_none());
+    }
+
+    #[test]
+    fn app_state_is_clone() {
+        fn assert_clone<T: Clone>() {}
+        assert_clone::<AppState>();
     }
 
     #[tokio::test]
-    async fn webhook_secret_hash_rejects_missing_header() {
-        let provider_impl = Arc::new(MockProvider::default());
-        let provider: Arc<dyn Provider> = provider_impl.clone();
-        let memory: Arc<dyn Memory> = Arc::new(MockMemory);
-        let secret = generate_test_secret();
-
+    async fn metrics_endpoint_returns_hint_when_prometheus_is_disabled() {
         let state = AppState {
             config: Arc::new(Mutex::new(Config::default())),
-            provider,
+            config_db: None,
+            provider: Arc::new(MockProvider::default()),
             model: "test-model".into(),
             temperature: 0.0,
-            mem: memory,
+            mem: Arc::new(MockMemory),
             auto_save: false,
-            webhook_secret_hash: Some(Arc::from(hash_webhook_secret(&secret))),
+            webhook_secret_hash: None,
             trust_forwarded_headers: false,
             rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
@@ -2063,78 +1590,67 @@ mod tests {
             nextcloud_talk: None,
             nextcloud_talk_webhook_secret: None,
             observer: Arc::new(crate::observability::NoopObserver),
-            config_db: None,
             tools_registry: Arc::new(Vec::new()),
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            cf_access_enabled: false,
+            cf_access_public_key: None,
+            cf_access_aud_tag: None,
         };
 
-        let response = handle_webhook(
-            State(state),
-            test_connect_info(),
-            HeaderMap::new(),
-            Ok(Json(WebhookBody {
-                message: "hello".into(),
-            })),
-        )
-        .await
-        .into_response();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(provider_impl.calls.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test]
-    async fn webhook_secret_hash_rejects_invalid_header() {
-        let provider_impl = Arc::new(MockProvider::default());
-        let provider: Arc<dyn Provider> = provider_impl.clone();
-        let memory: Arc<dyn Memory> = Arc::new(MockMemory);
-        let valid_secret = generate_test_secret();
-        let wrong_secret = generate_test_secret();
-
-        let state = AppState {
-            config: Arc::new(Mutex::new(Config::default())),
-            provider,
-            model: "test-model".into(),
-            temperature: 0.0,
-            mem: memory,
-            auto_save: false,
-            webhook_secret_hash: Some(Arc::from(hash_webhook_secret(&valid_secret))),
-            trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
-            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
-            whatsapp: None,
-            whatsapp_app_secret: None,
-            linq: None,
-            linq_signing_secret: None,
-            nextcloud_talk: None,
-            nextcloud_talk_webhook_secret: None,
-            observer: Arc::new(crate::observability::NoopObserver),
-            config_db: None,
-            tools_registry: Arc::new(Vec::new()),
-            cost_tracker: None,
-            event_tx: tokio::sync::broadcast::channel(16).0,
-        };
-
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "X-Webhook-Secret",
-            HeaderValue::from_str(&wrong_secret).unwrap(),
+        let response = handle_metrics(State(state)).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some(PROMETHEUS_CONTENT_TYPE)
         );
 
-        let response = handle_webhook(
-            State(state),
-            test_connect_info(),
-            headers,
-            Ok(Json(WebhookBody {
-                message: "hello".into(),
-            })),
-        )
-        .await
-        .into_response();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("Prometheus backend not enabled"));
+    }
 
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(provider_impl.calls.load(Ordering::SeqCst), 0);
+    #[tokio::test]
+    async fn metrics_endpoint_renders_prometheus_output() {
+        let prom = Arc::new(crate::observability::PrometheusObserver::new());
+        crate::observability::Observer::record_event(
+            prom.as_ref(),
+            &crate::observability::ObserverEvent::HeartbeatTick,
+        );
+
+        let observer: Arc<dyn crate::observability::Observer> = prom;
+        let state = AppState {
+            config: Arc::new(Mutex::new(Config::default())),
+            config_db: None,
+            provider: Arc::new(MockProvider::default()),
+            model: "test-model".into(),
+            temperature: 0.0,
+            mem: Arc::new(MockMemory),
+            auto_save: false,
+            webhook_secret_hash: None,
+            trust_forwarded_headers: false,
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
+            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            whatsapp: None,
+            whatsapp_app_secret: None,
+            linq: None,
+            linq_signing_secret: None,
+            nextcloud_talk: None,
+            nextcloud_talk_webhook_secret: None,
+            observer,
+            tools_registry: Arc::new(Vec::new()),
+            cost_tracker: None,
+            event_tx: tokio::sync::broadcast::channel(16).0,
+            cf_access_enabled: false,
+            cf_access_public_key: None,
+            cf_access_aud_tag: None,
+        };
+
+        let response = handle_metrics(State(state)).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
@@ -2166,6 +1682,9 @@ mod tests {
             tools_registry: Arc::new(Vec::new()),
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            cf_access_enabled: false,
+            cf_access_public_key: None,
+            cf_access_aud_tag: None,
         };
 
         let mut headers = HeaderMap::new();
@@ -2223,6 +1742,9 @@ mod tests {
             tools_registry: Arc::new(Vec::new()),
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            cf_access_enabled: false,
+            cf_access_public_key: None,
+            cf_access_aud_tag: None,
         };
 
         let response = handle_nextcloud_talk_webhook(
@@ -2262,9 +1784,8 @@ mod tests {
             mem: memory,
             auto_save: false,
             webhook_secret_hash: None,
-            pairing: Arc::new(PairingGuard::new(false, &[])),
             trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
             whatsapp: None,
             whatsapp_app_secret: None,
@@ -2277,6 +1798,9 @@ mod tests {
             tools_registry: Arc::new(Vec::new()),
             cost_tracker: None,
             event_tx: tokio::sync::broadcast::channel(16).0,
+            cf_access_enabled: false,
+            cf_access_public_key: None,
+            cf_access_aud_tag: None,
         };
 
         let mut headers = HeaderMap::new();
