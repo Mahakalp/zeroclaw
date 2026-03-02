@@ -1,3 +1,4 @@
+use crate::config::db::{Agent, ConfigDatabase, Provider};
 use crate::config::Config;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -363,65 +364,82 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
         ));
     }
 
-    // Provider validity
-    if let Some(ref provider) = config.default_provider {
-        if let Some(reason) = provider_validation_error(provider) {
+    // Try to fetch provider and agent info from database
+    let db_providers: Vec<Provider> = match ConfigDatabase::new(&config.workspace_dir) {
+        Ok(db) => match db.ensure_default_profile() {
+            Ok(profile) => db.get_providers(&profile.id).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        },
+        Err(_) => Vec::new(),
+    };
+
+    let db_agents: Vec<Agent> = match ConfigDatabase::new(&config.workspace_dir) {
+        Ok(db) => match db.ensure_default_profile() {
+            Ok(profile) => db.get_agents(&profile.id).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        },
+        Err(_) => Vec::new(),
+    };
+
+    // Provider validity (from database)
+    if let Some(provider) = db_providers.iter().find(|p| p.is_default) {
+        if let Some(reason) = provider_validation_error(&provider.name) {
             items.push(DiagItem::error(
                 cat,
-                format!("default provider \"{provider}\" is invalid: {reason}"),
+                format!(
+                    "default provider \"{}\" is invalid: {}",
+                    provider.name, reason
+                ),
             ));
         } else {
             items.push(DiagItem::ok(
                 cat,
-                format!("provider \"{provider}\" is valid"),
+                format!("provider \"{}\" is valid", provider.name),
             ));
         }
-    } else {
-        items.push(DiagItem::error(cat, "no default_provider configured"));
-    }
-
-    // API key presence
-    if config.default_provider.as_deref() != Some("ollama") {
-        if config.api_key.is_some() {
-            items.push(DiagItem::ok(cat, "API key configured"));
-        } else {
-            items.push(DiagItem::warn(
+        // API key presence from database
+        if provider.name != "ollama" {
+            if provider.api_key.is_some() {
+                items.push(DiagItem::ok(cat, "API key configured"));
+            } else {
+                items.push(DiagItem::warn(
+                    cat,
+                    "no api_key set (may rely on env vars or provider defaults)",
+                ));
+            }
+        }
+        // Model configured from database
+        if provider.default_model.is_some() {
+            items.push(DiagItem::ok(
                 cat,
-                "no api_key set (may rely on env vars or provider defaults)",
+                format!(
+                    "default model: {}",
+                    provider.default_model.as_deref().unwrap_or("?")
+                ),
             ));
+        } else {
+            items.push(DiagItem::warn(cat, "no default_model configured"));
         }
-    }
-
-    // Model configured
-    if config.default_model.is_some() {
-        items.push(DiagItem::ok(
-            cat,
-            format!(
-                "default model: {}",
-                config.default_model.as_deref().unwrap_or("?")
-            ),
-        ));
+        // Temperature range from database
+        if let Some(temp) = provider.temperature {
+            if temp >= 0.0 && temp <= 2.0 {
+                items.push(DiagItem::ok(
+                    cat,
+                    format!("temperature {:.1} (valid range 0.0–2.0)", temp),
+                ));
+            } else {
+                items.push(DiagItem::error(
+                    cat,
+                    format!("temperature {:.1} is out of range (expected 0.0–2.0)", temp),
+                ));
+            }
+        } else {
+            items.push(DiagItem::warn(cat, "no temperature configured"));
+        }
+    } else if db_providers.is_empty() {
+        items.push(DiagItem::error(cat, "no providers configured in database"));
     } else {
-        items.push(DiagItem::warn(cat, "no default_model configured"));
-    }
-
-    // Temperature range
-    if config.default_temperature >= 0.0 && config.default_temperature <= 2.0 {
-        items.push(DiagItem::ok(
-            cat,
-            format!(
-                "temperature {:.1} (valid range 0.0–2.0)",
-                config.default_temperature
-            ),
-        ));
-    } else {
-        items.push(DiagItem::error(
-            cat,
-            format!(
-                "temperature {:.1} is out of range (expected 0.0–2.0)",
-                config.default_temperature
-            ),
-        ));
+        items.push(DiagItem::error(cat, "no default provider configured"));
     }
 
     // Gateway port range
@@ -432,17 +450,20 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
         items.push(DiagItem::error(cat, "gateway port is 0 (invalid)"));
     }
 
-    // Reliability: fallback providers
-    for fb in &config.reliability.fallback_providers {
-        if let Some(reason) = provider_validation_error(fb) {
+    // Fallback providers (from database) - check providers that are not default
+    for provider in db_providers.iter().filter(|p| !p.is_default) {
+        if let Some(reason) = provider_validation_error(&provider.name) {
             items.push(DiagItem::warn(
                 cat,
-                format!("fallback provider \"{fb}\" is invalid: {reason}"),
+                format!(
+                    "fallback provider \"{}\" is invalid: {}",
+                    provider.name, reason
+                ),
             ));
         }
     }
 
-    // Model routes validation
+    // Model routes validation (still from config)
     for route in &config.model_routes {
         if route.hint.is_empty() {
             items.push(DiagItem::warn(cat, "model route with empty hint"));
@@ -529,19 +550,20 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
         ));
     }
 
-    // Delegate agents: provider validity
-    let mut agent_names: Vec<_> = config.agents.keys().collect();
+    // Delegate agents: provider validity (from database)
+    let mut agent_names: Vec<_> = db_agents.iter().map(|a| a.name.clone()).collect();
     agent_names.sort();
-    for name in agent_names {
-        let agent = config.agents.get(name).unwrap();
-        if let Some(reason) = provider_validation_error(&agent.provider) {
-            items.push(DiagItem::warn(
-                cat,
-                format!(
-                    "agent \"{name}\" uses invalid provider \"{}\": {}",
-                    agent.provider, reason
-                ),
-            ));
+    for name in &agent_names {
+        if let Some(agent) = db_agents.iter().find(|a| &a.name == name) {
+            if let Some(reason) = provider_validation_error(&agent.provider) {
+                items.push(DiagItem::warn(
+                    cat,
+                    format!(
+                        "agent \"{name}\" uses invalid provider \"{}\": {}",
+                        agent.provider, reason
+                    ),
+                ));
+            }
         }
     }
 }
