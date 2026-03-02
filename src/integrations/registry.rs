@@ -12,8 +12,9 @@ fn get_default_provider_name(config: &crate::config::Config) -> Option<String> {
             .get_default_provider("default")
             .ok()
             .flatten()
-            .map(|p| p.name),
-        Err(_) => None,
+            .map(|p| p.name)
+            .or_else(|| config.default_provider.clone()),
+        Err(_) => config.default_provider.clone(),
     }
 }
 
