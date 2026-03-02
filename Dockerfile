@@ -104,4 +104,4 @@ RUN chmod +x /docker-entrypoint.sh
 EXPOSE 42617
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["zeroclaw", "daemon"]
+CMD ["daemon"]

@@ -19,8 +19,8 @@ if [ "$(id -u)" = "0" ]; then
     chown -R "$ZEROCLAW_USER:$ZEROCLAW_GROUP" "$DATA_DIR"
 
     echo "Permissions fixed. Switching to user $ZEROCLAW_USER..."
-    exec gosu "$ZEROCLAW_USER" "$@"
+    exec gosu "$ZEROCLAW_USER" zeroclaw "$@"
 fi
 
 # If not root, just run the command
-exec "$@"
+exec zeroclaw "$@"
