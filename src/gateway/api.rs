@@ -106,9 +106,17 @@ pub async fn handle_api_public_status(State(state): State<AppState>) -> impl Int
         "components": health.components,
     });
 
+    let provider_name = state
+        .config_db
+        .as_ref()
+        .and_then(|db| db.get_default_provider("default").ok().flatten())
+        .map(|p| p.name)
+        .or_else(|| config.default_provider.clone())
+        .unwrap_or_else(|| "openrouter".to_string());
+
     let body = serde_json::json!({
         "status": "ok",
-        "provider": "openrouter",
+        "provider": provider_name,
         "model": state.model,
         "uptime_seconds": health.uptime_seconds,
         "gateway_port": config.gateway.port,
@@ -145,9 +153,17 @@ pub async fn handle_api_status(
         "components": health.components,
     });
 
+    let provider_name = state
+        .config_db
+        .as_ref()
+        .and_then(|db| db.get_default_provider("default").ok().flatten())
+        .map(|p| p.name)
+        .or_else(|| config.default_provider.clone())
+        .unwrap_or_else(|| "openrouter".to_string());
+
     let body = serde_json::json!({
         "status": "ok",
-        "provider": "openrouter",
+        "provider": provider_name,
         "model": state.model,
         "temperature": state.temperature,
         "uptime_seconds": health.uptime_seconds,
