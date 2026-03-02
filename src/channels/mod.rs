@@ -528,6 +528,28 @@ fn resolved_default_model(_config: &Config) -> String {
     "anthropic/claude-sonnet-4-20250514".to_string()
 }
 
+async fn get_provider_from_db(
+    db: &ConfigDatabase,
+) -> Result<(String, Option<String>, Option<String>, String)> {
+    let providers = db.get_providers("default")?;
+    let default_provider = providers
+        .iter()
+        .filter(|p| p.is_default)
+        .min_by_key(|p| p.priority);
+
+    match default_provider {
+        Some(db_provider) => Ok((
+            db_provider.name.clone(),
+            db_provider.api_key.clone(),
+            db_provider.api_url.clone(),
+            db_provider.default_model.clone().unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string()),
+        )),
+        None => anyhow::bail!(
+            "No default provider found in database. Please configure a provider via the web dashboard or API."
+        ),
+    }
+}
+
 fn runtime_defaults_from_config(config: &Config) -> ChannelRuntimeDefaults {
     ChannelRuntimeDefaults {
         default_provider: "openrouter".to_string(),
@@ -592,16 +614,19 @@ fn decrypt_optional_secret_for_runtime_reload(
     Ok(())
 }
 
-async fn load_runtime_defaults_from_config_file(path: &Path) -> Result<ChannelRuntimeDefaults> {
-    let contents = tokio::fs::read_to_string(path)
-        .await
-        .with_context(|| format!("Failed to read {}", path.display()))?;
-    let mut parsed: Config =
-        toml::from_str(&contents).with_context(|| format!("Failed to parse {}", path.display()))?;
-    parsed.config_path = path.to_path_buf();
-
-    parsed.apply_env_overrides();
-    Ok(runtime_defaults_from_config(&parsed))
+async fn load_runtime_defaults_from_db(
+    ctx: &ChannelRuntimeContext,
+) -> Result<ChannelRuntimeDefaults> {
+    let db = ConfigDatabase::new(&ctx.workspace_dir)?;
+    let (provider_name, api_key, api_url, model) = get_provider_from_db(&db).await?;
+    Ok(ChannelRuntimeDefaults {
+        default_provider: provider_name,
+        model,
+        temperature: 0.7,
+        api_key,
+        api_url,
+        reliability: (*ctx.reliability).clone(),
+    })
 }
 
 async fn maybe_apply_runtime_config_update(ctx: &ChannelRuntimeContext) -> Result<()> {
@@ -624,7 +649,7 @@ async fn maybe_apply_runtime_config_update(ctx: &ChannelRuntimeContext) -> Resul
         }
     }
 
-    let next_defaults = load_runtime_defaults_from_config_file(&config_path).await?;
+    let next_defaults = load_runtime_defaults_from_db(ctx).await?;
     let next_default_provider = providers::create_resilient_provider_with_options(
         &next_defaults.default_provider,
         next_defaults.api_key.as_deref(),
@@ -3201,7 +3226,23 @@ pub async fn start_channels(config: Config) -> Result<()> {
         }
     };
 
-    let provider_name = resolved_default_provider(&config);
+    // Fetch provider from database
+    let (provider_name, api_key, api_url, model) = if let Some(ref db) = config_db {
+        match get_provider_from_db(db).await {
+            Ok(provider_info) => provider_info,
+            Err(e) => {
+                anyhow::bail!(
+                    "Failed to fetch provider from database: {}. Please configure a provider via the web dashboard or API.",
+                    e
+                );
+            }
+        }
+    } else {
+        anyhow::bail!(
+            "No database available. Please ensure the config database is properly initialized."
+        );
+    };
+
     let provider_runtime_options = providers::ProviderRuntimeOptions {
         auth_profile_override: None,
         zeroclaw_dir: config.config_path.parent().map(std::path::PathBuf::from),
@@ -3211,8 +3252,8 @@ pub async fn start_channels(config: Config) -> Result<()> {
     let provider: Arc<dyn Provider> = Arc::from(
         create_resilient_provider_nonblocking(
             &provider_name,
-            None,
-            None,
+            api_key,
+            api_url,
             config.reliability.clone(),
             provider_runtime_options.clone(),
         )
@@ -3233,7 +3274,14 @@ pub async fn start_channels(config: Config) -> Result<()> {
         store.insert(
             config.config_path.clone(),
             RuntimeConfigState {
-                defaults: runtime_defaults_from_config(&config),
+                defaults: ChannelRuntimeDefaults {
+                    default_provider: provider_name.clone(),
+                    model: model.clone(),
+                    temperature: 0.7,
+                    api_key: None,
+                    api_url: None,
+                    reliability: config.reliability.clone(),
+                },
                 last_applied_stamp: initial_stamp,
             },
         );
@@ -3247,7 +3295,6 @@ pub async fn start_channels(config: Config) -> Result<()> {
         &config.autonomy,
         &config.workspace_dir,
     ));
-    let model = resolved_default_model(&config);
     let temperature = 0.7;
     let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
         &config.memory,
