@@ -67,9 +67,6 @@ RUN mkdir -p /zeroclaw-data /zeroclaw-data/workspace && \
     cat > /zeroclaw-data/config.toml <<EOF
 workspace_dir = "/zeroclaw-data/workspace"
 config_path = "/zeroclaw-data/config.toml"
-api_key = ""
-default_provider = "openrouter"
-default_model = "anthropic/claude-sonnet-4-20250514"
 default_temperature = 0.7
 
 [gateway]
