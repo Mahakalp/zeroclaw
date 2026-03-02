@@ -18,7 +18,7 @@ use crate::cost::CostTracker;
 use crate::memory::{self, Memory, MemoryCategory};
 use crate::providers::{self, ChatMessage, Provider};
 use crate::runtime;
-use crate::security::pairing::{constant_time_eq, is_public_bind};
+use crate::security::pairing::{constant_time_eq, is_public_bind, PairingGuard};
 use crate::security::SecurityPolicy;
 use crate::tools;
 use crate::tools::traits::ToolSpec;
@@ -1502,9 +1502,8 @@ mod tests {
             mem: Arc::new(MockMemory),
             auto_save: false,
             webhook_secret_hash: None,
-            pairing: Arc::new(PairingGuard::new(false, &[])),
             trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
             whatsapp: None,
             whatsapp_app_secret: None,
@@ -1551,9 +1550,8 @@ mod tests {
             mem: Arc::new(MockMemory),
             auto_save: false,
             webhook_secret_hash: None,
-            pairing: Arc::new(PairingGuard::new(false, &[])),
             trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
             whatsapp: None,
             whatsapp_app_secret: None,
@@ -1577,10 +1575,10 @@ mod tests {
 
     #[test]
     fn gateway_rate_limiter_blocks_after_limit() {
-        let limiter = GatewayRateLimiter::new(2, 2, 100);
-        assert!(limiter.allow_pair("127.0.0.1"));
-        assert!(limiter.allow_pair("127.0.0.1"));
-        assert!(!limiter.allow_pair("127.0.0.1"));
+        let limiter = GatewayRateLimiter::new(2, 100);
+        assert!(limiter.allow_webhook("127.0.0.1"));
+        assert!(limiter.allow_webhook("127.0.0.1"));
+        assert!(!limiter.allow_webhook("127.0.0.1"));
     }
 
     #[test]
@@ -1978,11 +1976,10 @@ mod tests {
             model: "test-model".into(),
             temperature: 0.0,
             mem: memory,
-            auto_save: true,
+            auto_save: false,
             webhook_secret_hash: None,
-            pairing: Arc::new(PairingGuard::new(false, &[])),
             trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
             whatsapp: None,
             whatsapp_app_secret: None,
@@ -2056,9 +2053,8 @@ mod tests {
             mem: memory,
             auto_save: false,
             webhook_secret_hash: Some(Arc::from(hash_webhook_secret(&secret))),
-            pairing: Arc::new(PairingGuard::new(false, &[])),
             trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
             whatsapp: None,
             whatsapp_app_secret: None,
@@ -2104,9 +2100,8 @@ mod tests {
             mem: memory,
             auto_save: false,
             webhook_secret_hash: Some(Arc::from(hash_webhook_secret(&valid_secret))),
-            pairing: Arc::new(PairingGuard::new(false, &[])),
             trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
             whatsapp: None,
             whatsapp_app_secret: None,
@@ -2157,9 +2152,8 @@ mod tests {
             mem: memory,
             auto_save: false,
             webhook_secret_hash: Some(Arc::from(hash_webhook_secret(&secret))),
-            pairing: Arc::new(PairingGuard::new(false, &[])),
             trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
             whatsapp: None,
             whatsapp_app_secret: None,
@@ -2215,9 +2209,8 @@ mod tests {
             mem: memory,
             auto_save: false,
             webhook_secret_hash: None,
-            pairing: Arc::new(PairingGuard::new(false, &[])),
             trust_forwarded_headers: false,
-            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100)),
             idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
             whatsapp: None,
             whatsapp_app_secret: None,
@@ -2591,22 +2584,6 @@ mod tests {
         assert!(guard.0.contains_key("ip-2"));
         assert!(guard.0.contains_key("ip-3"));
         assert!(guard.0.contains_key("ip-4"));
-    }
-
-    #[test]
-    fn gateway_rate_limiter_pair_and_webhook_are_independent() {
-        let limiter = GatewayRateLimiter::new(2, 3, 100);
-
-        // Exhaust pair limit
-        assert!(limiter.allow_pair("ip-1"));
-        assert!(limiter.allow_pair("ip-1"));
-        assert!(!limiter.allow_pair("ip-1")); // pair blocked
-
-        // Webhook should still work
-        assert!(limiter.allow_webhook("ip-1"));
-        assert!(limiter.allow_webhook("ip-1"));
-        assert!(limiter.allow_webhook("ip-1"));
-        assert!(!limiter.allow_webhook("ip-1")); // webhook now blocked
     }
 
     #[test]

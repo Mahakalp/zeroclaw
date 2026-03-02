@@ -5780,6 +5780,7 @@ channel_id = "C123"
             idempotency_max_keys: 4096,
             cf_access_enabled: false,
             cf_access_public_key: String::new(),
+            cf_access_aud_tag: String::new(),
         };
         let toml_str = toml::to_string(&g).unwrap();
         let parsed: GatewayConfig = toml::from_str(&toml_str).unwrap();
