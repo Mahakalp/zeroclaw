@@ -376,17 +376,36 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
   const fields = CHANNEL_FIELDS[channelKey] || [];
   
   useEffect(() => {
-    getConfig()
-      .then((config) => {
+    async function loadValues() {
+      try {
+        const config = await getConfig();
         setConfigToml(config);
-        const parsed = parseCurrentConfig(config, channelKey);
+        
+        let parsed: Record<string, string> = {};
+        
+        if (isProviderKey(channelKey)) {
+          const providers = await getProviders();
+          const existing = providers.find((p) => p.name === channelKey);
+          if (existing) {
+            parsed = {
+              api_key: existing.api_key || '',
+              api_url: existing.api_url || '',
+              default_model: existing.default_model || '',
+            };
+          }
+        } else {
+          parsed = parseCurrentConfig(config, channelKey);
+        }
+        
         setValues(parsed);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Failed to load config');
+      } finally {
         setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
+      }
+    }
+    
+    loadValues();
   }, [channelKey]);
   
   const handleSave = async () => {
@@ -406,12 +425,18 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
         // Save provider to database
         const providers = await getProviders();
         const existing = providers.find((p) => p.name === channelKey);
+        
+        // Preserve existing values if the field is empty (user didn't change it)
+        const currentApiKey = sanitizedValues.api_key;
+        const currentApiUrl = sanitizedValues.api_url;
+        const currentDefaultModel = sanitizedValues.default_model;
+        
         const providerPayload = {
           profile_id: existing?.profile_id || 'default',
           name: channelKey,
-          api_key: sanitizedValues.api_key || undefined,
-          api_url: sanitizedValues.api_url || undefined,
-          default_model: sanitizedValues.default_model || undefined,
+          api_key: currentApiKey || existing?.api_key || undefined,
+          api_url: currentApiUrl || existing?.api_url || undefined,
+          default_model: currentDefaultModel || existing?.default_model || undefined,
           is_enabled: true,
           is_default: true,
           priority: existing?.priority ?? 0,

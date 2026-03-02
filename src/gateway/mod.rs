@@ -334,6 +334,57 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         }
     };
 
+    // Merge provider credentials from database into config
+    let (api_key, api_url, default_model) = if let Some(ref db) = config_db {
+        if let Some(ref provider_name) = config.default_provider {
+            if let Ok(providers) = db.get_providers("default") {
+                if let Some(db_provider) = providers
+                    .iter()
+                    .find(|p| p.name == *provider_name && p.is_default)
+                {
+                    (
+                        db_provider
+                            .api_key
+                            .clone()
+                            .or_else(|| config.api_key.clone()),
+                        db_provider
+                            .api_url
+                            .clone()
+                            .or_else(|| config.api_url.clone()),
+                        db_provider
+                            .default_model
+                            .clone()
+                            .or_else(|| config.default_model.clone()),
+                    )
+                } else {
+                    (
+                        config.api_key.clone(),
+                        config.api_url.clone(),
+                        config.default_model.clone(),
+                    )
+                }
+            } else {
+                (
+                    config.api_key.clone(),
+                    config.api_url.clone(),
+                    config.default_model.clone(),
+                )
+            }
+        } else {
+            (
+                config.api_key.clone(),
+                config.api_url.clone(),
+                config.default_model.clone(),
+            )
+        }
+    } else {
+        (
+            config.api_key.clone(),
+            config.api_url.clone(),
+            config.default_model.clone(),
+        )
+    };
+
     // ── Hooks ──────────────────────────────────────────────────────
     let hooks: Option<std::sync::Arc<crate::hooks::HookRunner>> = if config.hooks.enabled {
         Some(std::sync::Arc::new(crate::hooks::HookRunner::new()))
@@ -348,8 +399,8 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
 
     let provider: Arc<dyn Provider> = Arc::from(providers::create_resilient_provider_with_options(
         config.default_provider.as_deref().unwrap_or("openrouter"),
-        config.api_key.as_deref(),
-        config.api_url.as_deref(),
+        api_key.as_deref(),
+        api_url.as_deref(),
         &config.reliability,
         &providers::ProviderRuntimeOptions {
             auth_profile_override: None,
@@ -358,8 +409,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
             reasoning_enabled: config.runtime.reasoning_enabled,
         },
     )?);
-    let model = config
-        .default_model
+    let model = default_model
         .clone()
         .unwrap_or_else(|| "anthropic/claude-sonnet-4".into());
     let temperature = config.default_temperature;
@@ -367,7 +417,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
         &config.memory,
         Some(&config.storage.provider.config),
         &config.workspace_dir,
-        config.api_key.as_deref(),
+        api_key.as_deref(),
     )?);
     let runtime: Arc<dyn runtime::RuntimeAdapter> =
         Arc::from(runtime::create_runtime(&config.runtime)?);
