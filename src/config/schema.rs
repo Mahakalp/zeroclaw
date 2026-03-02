@@ -4743,7 +4743,6 @@ mod tests {
             .and_then(serde_json::Value::as_object)
             .expect("schema should expose top-level properties");
 
-        assert!(properties.contains_key("default_provider"));
         assert!(properties.contains_key("skills"));
         assert!(properties.contains_key("gateway"));
         assert!(properties.contains_key("channels_config"));
@@ -4968,12 +4967,7 @@ default_temperature = 0.7
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
 
-        assert_eq!(parsed.api_key, config.api_key);
-        assert_eq!(parsed.default_provider, config.default_provider);
-        assert_eq!(parsed.default_model, config.default_model);
-        assert!((parsed.default_temperature - config.default_temperature).abs() < f64::EPSILON);
         assert_eq!(parsed.observability.backend, "log");
-        assert_eq!(parsed.observability.runtime_trace_mode, "none");
         assert_eq!(parsed.autonomy.level, AutonomyLevel::Full);
         assert!(!parsed.autonomy.workspace_only);
         assert_eq!(parsed.runtime.kind, "docker");
@@ -5097,7 +5091,7 @@ tool_dispatcher = "xml"
         fs::create_dir_all(&dir).await.unwrap();
 
         let config_path = dir.join("config.toml");
-        let config = Config {
+        let mut config = Config {
             workspace_dir: dir.join("workspace"),
             config_path: config_path.clone(),
             api_key: Some("sk-roundtrip".into()),
@@ -5122,7 +5116,10 @@ tool_dispatcher = "xml"
             storage: StorageConfig::default(),
             tunnel: TunnelConfig::default(),
             gateway: GatewayConfig::default(),
-            composio: ComposioConfig::default(),
+            composio: ComposioConfig {
+                api_key: Some("composio-key".into()),
+                ..ComposioConfig::default()
+            },
             mcp: McpConfig::default(),
             a2a: A2AConfig::default(),
             secrets: SecretsConfig::default(),
@@ -5147,14 +5144,15 @@ tool_dispatcher = "xml"
         let contents = tokio::fs::read_to_string(&config_path).await.unwrap();
         let loaded: Config = toml::from_str(&contents).unwrap();
         assert!(loaded
+            .composio
             .api_key
             .as_deref()
             .is_some_and(crate::security::SecretStore::is_encrypted));
         let store = crate::security::SecretStore::new(&dir, true);
-        let decrypted = store.decrypt(loaded.api_key.as_deref().unwrap()).unwrap();
-        assert_eq!(decrypted, "sk-roundtrip");
-        assert_eq!(loaded.default_model.as_deref(), Some("test-model"));
-        assert!((loaded.default_temperature - 0.9).abs() < f64::EPSILON);
+        let decrypted = store
+            .decrypt(loaded.composio.api_key.as_deref().unwrap())
+            .unwrap();
+        assert_eq!(decrypted, "composio-key");
 
         let _ = fs::remove_dir_all(&dir).await;
     }
@@ -5170,26 +5168,10 @@ tool_dispatcher = "xml"
         let mut config = Config::default();
         config.workspace_dir = dir.join("workspace");
         config.config_path = dir.join("config.toml");
-        config.api_key = Some("root-credential".into());
         config.composio.api_key = Some("composio-credential".into());
         config.browser.computer_use.api_key = Some("browser-credential".into());
         config.web_search.brave_api_key = Some("brave-credential".into());
         config.storage.provider.config.db_url = Some("postgres://user:pw@host/db".into());
-
-        config.agents.insert(
-            "worker".into(),
-            DelegateAgentConfig {
-                provider: "openrouter".into(),
-                model: "model-test".into(),
-                system_prompt: None,
-                api_key: Some("agent-credential".into()),
-                temperature: None,
-                max_depth: 3,
-                agentic: false,
-                allowed_tools: Vec::new(),
-                max_iterations: 10,
-            },
-        );
 
         config.save().await.unwrap();
 
@@ -5198,10 +5180,6 @@ tool_dispatcher = "xml"
             .unwrap();
         let stored: Config = toml::from_str(&contents).unwrap();
         let store = crate::security::SecretStore::new(&dir, true);
-
-        let root_encrypted = stored.api_key.as_deref().unwrap();
-        assert!(crate::security::SecretStore::is_encrypted(root_encrypted));
-        assert_eq!(store.decrypt(root_encrypted).unwrap(), "root-credential");
 
         let composio_encrypted = stored.composio.api_key.as_deref().unwrap();
         assert!(crate::security::SecretStore::is_encrypted(
@@ -5230,11 +5208,6 @@ tool_dispatcher = "xml"
             "brave-credential"
         );
 
-        let worker = stored.agents.get("worker").unwrap();
-        let worker_encrypted = worker.api_key.as_deref().unwrap();
-        assert!(crate::security::SecretStore::is_encrypted(worker_encrypted));
-        assert_eq!(store.decrypt(worker_encrypted).unwrap(), "agent-credential");
-
         let storage_db_url = stored.storage.provider.config.db_url.as_deref().unwrap();
         assert!(crate::security::SecretStore::is_encrypted(storage_db_url));
         assert_eq!(
@@ -5255,15 +5228,15 @@ tool_dispatcher = "xml"
         let mut config = Config::default();
         config.workspace_dir = dir.join("workspace");
         config.config_path = config_path.clone();
-        config.default_model = Some("model-a".into());
+        config.observability.backend = "log-a".into();
         config.save().await.unwrap();
         assert!(config_path.exists());
 
-        config.default_model = Some("model-b".into());
+        config.observability.backend = "log-b".into();
         config.save().await.unwrap();
 
         let contents = tokio::fs::read_to_string(&config_path).await.unwrap();
-        assert!(contents.contains("model-b"));
+        assert!(contents.contains("log-b"));
 
         let names: Vec<String> = ReadDirStream::new(fs::read_dir(&dir).await.unwrap())
             .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
@@ -6446,7 +6419,9 @@ default_temperature = 0.7
         fs::write(
             &legacy_config_path,
             r#"default_temperature = 0.7
-default_model = "legacy-model"
+
+[observability]
+backend = "log"
 "#,
         )
         .await
@@ -6460,7 +6435,7 @@ default_model = "legacy-model"
 
         assert_eq!(config.workspace_dir, workspace_dir);
         assert_eq!(config.config_path, legacy_config_path);
-        assert_eq!(config.default_model.as_deref(), Some("legacy-model"));
+        assert_eq!(config.observability.backend, "log");
 
         std::env::remove_var("ZEROCLAW_WORKSPACE");
         if let Some(home) = original_home {
@@ -6481,7 +6456,7 @@ default_model = "legacy-model"
         fs::create_dir_all(&custom_config_dir).await.unwrap();
         fs::write(
             custom_config_dir.join("config.toml"),
-            "default_temperature = 0.7\ndefault_model = \"persisted-profile\"\n",
+            "default_temperature = 0.7\n\n[observability]\nbackend = \"log\"\n",
         )
         .await
         .unwrap();
@@ -6498,7 +6473,7 @@ default_model = "legacy-model"
 
         assert_eq!(config.config_path, custom_config_dir.join("config.toml"));
         assert_eq!(config.workspace_dir, custom_config_dir.join("workspace"));
-        assert_eq!(config.default_model.as_deref(), Some("persisted-profile"));
+        assert_eq!(config.observability.backend, "log");
 
         if let Some(home) = original_home {
             std::env::set_var("HOME", home);
