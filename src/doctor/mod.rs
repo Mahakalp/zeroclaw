@@ -450,15 +450,43 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
         items.push(DiagItem::error(cat, "gateway port is 0 (invalid)"));
     }
 
-    // Fallback providers (from database) - check providers that are not default
-    for provider in db_providers.iter().filter(|p| !p.is_default) {
-        if let Some(reason) = provider_validation_error(&provider.name) {
+    // Fallback providers (from config.reliability.fallback_providers)
+    for fallback in &config.reliability.fallback_providers {
+        if let Some(reason) = provider_validation_error(fallback) {
             items.push(DiagItem::warn(
                 cat,
-                format!(
-                    "fallback provider \"{}\" is invalid: {}",
-                    provider.name, reason
-                ),
+                format!("fallback provider \"{fallback}\" is invalid: {reason}"),
+            ));
+        }
+    }
+
+    // Legacy config field: default_provider
+    if let Some(ref provider) = config.default_provider {
+        if let Some(reason) = provider_validation_error(provider) {
+            items.push(DiagItem::error(
+                cat,
+                format!("default provider \"{provider}\" is invalid: {reason}"),
+            ));
+        } else {
+            items.push(DiagItem::ok(
+                cat,
+                format!("provider \"{provider}\" is valid"),
+            ));
+        }
+    }
+
+    // Legacy config field: default_temperature
+    if config.default_temperature != 0.0 {
+        let temp = config.default_temperature;
+        if temp >= 0.0 && temp <= 2.0 {
+            items.push(DiagItem::ok(
+                cat,
+                format!("temperature {:.1} (valid range 0.0–2.0)", temp),
+            ));
+        } else {
+            items.push(DiagItem::error(
+                cat,
+                format!("temperature {:.1} is out of range (expected 0.0–2.0)", temp),
             ));
         }
     }
@@ -563,6 +591,25 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
                         agent.provider, reason
                     ),
                 ));
+            }
+        }
+    }
+
+    // Legacy config field: agents (delegate agent configs)
+    let mut legacy_agent_names: Vec<_> = config.agents.keys().cloned().collect();
+    legacy_agent_names.sort();
+    for name in &legacy_agent_names {
+        if let Some(agent) = config.agents.get(name) {
+            if let Some(reason) = provider_validation_error(&agent.provider) {
+                items.push(DiagItem::warn(
+                    cat,
+                    format!(
+                        "agent \"{name}\" uses invalid provider \"{}\": {}",
+                        agent.provider, reason
+                    ),
+                ));
+            } else {
+                items.push(DiagItem::ok(cat, format!("agent \"{name}\" configured")));
             }
         }
     }
