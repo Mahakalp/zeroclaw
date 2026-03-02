@@ -23,7 +23,7 @@ use crate::security::SecurityPolicy;
 use crate::tools;
 use crate::tools::traits::ToolSpec;
 use crate::util::truncate_with_ellipsis;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use axum::{
     body::Bytes,
     extract::{ConnectInfo, Query, State},
@@ -339,27 +339,33 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     let (api_key, api_url, default_model, resolved_provider_name) = if let Some(ref db) = config_db
     {
         if let Ok(providers) = db.get_providers("default") {
-            // Find provider with is_default=true, pick lowest priority number (highest priority)
             let default_provider = providers
                 .iter()
                 .filter(|p| p.is_default)
                 .min_by_key(|p| p.priority);
 
-            if let Some(db_provider) = default_provider {
-                (
+            match default_provider {
+                Some(db_provider) => (
                     db_provider.api_key.clone(),
                     db_provider.api_url.clone(),
                     db_provider.default_model.clone(),
                     Some(db_provider.name.clone()),
-                )
-            } else {
-                (None, None, None, None)
+                ),
+                None => {
+                    anyhow::bail!(
+                        "No default provider found in database. Please configure a provider via the web dashboard or API."
+                    );
+                }
             }
         } else {
-            (None, None, None, None)
+            anyhow::bail!(
+                "Failed to fetch providers from database. Please ensure the database is properly initialized."
+            );
         }
     } else {
-        (None, None, None, None)
+        anyhow::bail!(
+            "No database available. Please ensure the config database is properly initialized."
+        );
     };
 
     // ── Hooks ──────────────────────────────────────────────────────
@@ -375,7 +381,9 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     let display_addr = format!("{host}:{actual_port}");
 
     let provider: Arc<dyn Provider> = Arc::from(providers::create_resilient_provider_with_options(
-        resolved_provider_name.as_deref().unwrap_or("openrouter"),
+        resolved_provider_name
+            .as_deref()
+            .expect("Provider name should be set from database"),
         api_key.as_deref(),
         api_url.as_deref(),
         &config.reliability,
@@ -388,7 +396,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     )?);
     let model = default_model
         .clone()
-        .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string());
+        .expect("Model should be set from database");
     let temperature = 0.7;
     let mem: Arc<dyn Memory> = Arc::from(memory::create_memory_with_storage(
         &config.memory,
