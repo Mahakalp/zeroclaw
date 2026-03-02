@@ -202,6 +202,23 @@ impl ConfigDatabase {
             [],
         )?;
 
+        // Migration 2: Add temperature column to providers if missing
+        let has_temp: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('providers') WHERE name = 'temperature'",
+            [],
+            |row| row.get(0),
+        )?;
+        if has_temp == 0 {
+            conn.execute(
+                "ALTER TABLE providers ADD COLUMN temperature REAL DEFAULT 0.7",
+                [],
+            )?;
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations (version) VALUES (2)",
+                [],
+            )?;
+        }
+
         Ok(())
     }
 

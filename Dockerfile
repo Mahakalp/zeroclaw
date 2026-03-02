@@ -85,6 +85,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         curl \
         ca-certificates \
+        gosu \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -95,8 +96,12 @@ COPY --from=builder /zeroclaw-data /zeroclaw-data
 
 WORKDIR /
 
+# Copy entrypoint script
+COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # Expose gateway port
 EXPOSE 42617
 
-ENTRYPOINT ["zeroclaw"]
-CMD ["daemon"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["zeroclaw", "daemon"]
