@@ -443,6 +443,15 @@ export function ChannelConfigModal({ channel, onClose, onSaved }: ChannelConfigM
           metadata: existing?.metadata || '{}',
         };
 
+        // Unset all other providers as default before setting this one
+        const allProviders = await getProviders();
+        const updates = allProviders.map(async (p) => {
+          if (p.is_default && p.id !== existing?.id) {
+            await updateProvider(p.id, { ...p, is_default: false });
+          }
+        });
+        await Promise.all(updates);
+
         if (existing) {
           await updateProvider(existing.id, providerPayload);
         } else {

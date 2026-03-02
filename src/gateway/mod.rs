@@ -335,39 +335,38 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     };
 
     // Merge provider credentials from database into config
-    let (api_key, api_url, default_model) = if let Some(ref db) = config_db {
-        if let Some(ref provider_name) = config.default_provider {
-            if let Ok(providers) = db.get_providers("default") {
-                if let Some(db_provider) = providers
-                    .iter()
-                    .find(|p| p.name == *provider_name && p.is_default)
-                {
-                    (
-                        db_provider
-                            .api_key
-                            .clone()
-                            .or_else(|| config.api_key.clone()),
-                        db_provider
-                            .api_url
-                            .clone()
-                            .or_else(|| config.api_url.clone()),
-                        db_provider
-                            .default_model
-                            .clone()
-                            .or_else(|| config.default_model.clone()),
-                    )
-                } else {
-                    (
-                        config.api_key.clone(),
-                        config.api_url.clone(),
-                        config.default_model.clone(),
-                    )
-                }
+    // Use default provider from DB (is_default=true), fall back to config.toml
+    let (api_key, api_url, default_model, resolved_provider_name) = if let Some(ref db) = config_db
+    {
+        if let Ok(providers) = db.get_providers("default") {
+            // Find provider with is_default=true, pick lowest priority number (highest priority)
+            let default_provider = providers
+                .iter()
+                .filter(|p| p.is_default)
+                .min_by_key(|p| p.priority);
+
+            if let Some(db_provider) = default_provider {
+                (
+                    db_provider
+                        .api_key
+                        .clone()
+                        .or_else(|| config.api_key.clone()),
+                    db_provider
+                        .api_url
+                        .clone()
+                        .or_else(|| config.api_url.clone()),
+                    db_provider
+                        .default_model
+                        .clone()
+                        .or_else(|| config.default_model.clone()),
+                    Some(db_provider.name.clone()),
+                )
             } else {
                 (
                     config.api_key.clone(),
                     config.api_url.clone(),
                     config.default_model.clone(),
+                    config.default_provider.clone(),
                 )
             }
         } else {
@@ -375,6 +374,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
                 config.api_key.clone(),
                 config.api_url.clone(),
                 config.default_model.clone(),
+                config.default_provider.clone(),
             )
         }
     } else {
@@ -382,6 +382,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
             config.api_key.clone(),
             config.api_url.clone(),
             config.default_model.clone(),
+            config.default_provider.clone(),
         )
     };
 
@@ -398,7 +399,7 @@ pub async fn run_gateway(host: &str, port: u16, config: Config) -> Result<()> {
     let display_addr = format!("{host}:{actual_port}");
 
     let provider: Arc<dyn Provider> = Arc::from(providers::create_resilient_provider_with_options(
-        config.default_provider.as_deref().unwrap_or("openrouter"),
+        resolved_provider_name.as_deref().unwrap_or("openrouter"),
         api_key.as_deref(),
         api_url.as_deref(),
         &config.reliability,
