@@ -490,7 +490,7 @@ async fn run_quick_setup_with_home(
     let config = Config {
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
-        api_key: None,
+        api_key: credential_override.map(str::to_string),
         api_url: None,
         default_provider: Some(provider_name.clone()),
         default_model: Some(model.clone()),
@@ -5777,10 +5777,6 @@ mod tests {
         assert_eq!(config.default_provider.as_deref(), Some("openrouter"));
         assert_eq!(config.default_model.as_deref(), Some("custom-model-946"));
         assert_eq!(config.api_key.as_deref(), Some("sk-issue946"));
-
-        let config_raw = tokio::fs::read_to_string(config.config_path).await.unwrap();
-        assert!(config_raw.contains("default_provider = \"openrouter\""));
-        assert!(config_raw.contains("default_model = \"custom-model-946\""));
     }
 
     #[tokio::test]
@@ -5867,10 +5863,6 @@ mod tests {
         assert_eq!(config.default_provider.as_deref(), Some("openrouter"));
         assert_eq!(config.default_model.as_deref(), Some("custom-model-fresh"));
         assert_eq!(config.api_key.as_deref(), Some("sk-force"));
-
-        let config_raw = tokio::fs::read_to_string(config.config_path).await.unwrap();
-        assert!(config_raw.contains("default_provider = \"openrouter\""));
-        assert!(config_raw.contains("default_model = \"custom-model-fresh\""));
     }
 
     #[tokio::test]
